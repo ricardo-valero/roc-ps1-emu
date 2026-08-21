@@ -12,13 +12,20 @@ ticked as changes archive.
   nightly, sibling `package/` + `check/` skeleton, resource conventions
   (OpenBIOS for gates, US disc canonical).
 
+- [x] **CPU core + verification** — R3000A interpreter: full MIPS I
+  ISA, load/branch delay slots (targets and links relative to the
+  actual delay-slot address), COP0 exceptions (which the vectors DO
+  cover, README caveat notwithstanding). Gated by SingleStepTests/r3000:
+  55,000/55,000 cases across all 55 files, no exclusions, plus a
+  throughput bench (0.44x — see CPU perf below).
+
 ## Next
 
-- [ ] **CPU core + verification** — R3000A interpreter: full MIPS I
-  ISA, load/branch delay slots, COP0 exceptions. Gated by
-  SingleStepTests/r3000 JSON (1,000 cases per instruction, per-cycle
-  memory transactions; exceptions excluded there — Amidog covers them
-  later, on-console).
+- [ ] **CPU perf** — ablation-profile the step loop to ≥ 1.00x real
+  time (2.00x target) before subsystems pile on. First measurement
+  0.44x; flat unrolled registers already tried and measured slower
+  than the List file — the suspects are per-step record/bus refcount
+  churn (see the bench header and change notes).
 - [ ] **Memory bus + EXE sideload** — memory map (RAM, scratchpad,
   BIOS window, I/O stubs), IRQ controller skeleton, PS-EXE loader.
   Sideloading is the key move: the entire test corpus (Amidog,
