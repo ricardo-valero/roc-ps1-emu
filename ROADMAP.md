@@ -19,13 +19,16 @@ ticked as changes archive.
   55,000/55,000 cases across all 55 files, no exclusions, plus a
   throughput bench (0.44x — see CPU perf below).
 
+- [x] **CPU perf** — 0.44x → 0.63x (21.4M steps/s, above the GBA
+  core's accepted final in host throughput): fused single-build step,
+  flat registers (won its rematch on the fused structure), SSA bus
+  threading; losers measured and reverted. Floor committed at 0.55x;
+  ≥ 1.00x arrives with the bus change's wait-state cycle accounting
+  (GBA precedent: 1.08x flat → 2.6x real bus). Decode cache is the
+  known lever beyond that.
+
 ## Next
 
-- [ ] **CPU perf** — ablation-profile the step loop to ≥ 1.00x real
-  time (2.00x target) before subsystems pile on. First measurement
-  0.44x; flat unrolled registers already tried and measured slower
-  than the List file — the suspects are per-step record/bus refcount
-  churn (see the bench header and change notes).
 - [ ] **Memory bus + EXE sideload** — memory map (RAM, scratchpad,
   BIOS window, I/O stubs), IRQ controller skeleton, PS-EXE loader.
   Sideloading is the key move: the entire test corpus (Amidog,

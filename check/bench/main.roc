@@ -5,12 +5,18 @@
 #
 #   roc build check/bench/main.roc --output=/tmp/bench && /tmp/bench [N]
 #
-# First recorded measurement (2026-08-21, M-series, compiled): 0.44x —
-# 15.2M cycles/s vs the 33.8688 MHz line. The committed verdict is a
-# REGRESSION FLOOR at 0.30x (exits nonzero below it); the 1.00x/2.00x
-# bands are printed as the targets for the planned ps1-cpu-perf change
-# (ablation profiling — flat unrolled registers were tried and measured
-# SLOWER than the List file + single-record finish, 0.36x vs 0.44x).
+# ps1-cpu-perf ledger (2026-08-21, M-series, compiled, 30M instructions):
+#   0.44x baseline -> 0.57x fused single-build step (Out record removed)
+#   -> 0.61x flat unrolled registers (won its rematch on the fused
+#   structure after losing pre-fusion, 0.36x) -> 0.63x SSA bus threading.
+# 21.4M steps/s exceeds the GBA core's accepted final (18.1M); the ratio
+# reads 0.63x only because the PS1 line is 33.87 MHz. Fleet precedent
+# (ngba REPORT.md): the flat bus is the worst case — once the memory-bus
+# change models wait states (PS1 RAM ~5 cycles/access), emulated
+# cycles/s crosses 1.00x at identical host throughput (GBA: 1.08x flat
+# -> 2.6x on real ROM code). Committed verdict: REGRESSION FLOOR 0.55x
+# (exits nonzero below); 1.00x/2.00x print as the bus-change targets.
+# The decode cache remains the known lever beyond that.
 app [main!] {
     pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.21.0/4rAQg8kUYZ3Vksr4qMQHpaFYNiHSn9GgS7gVxghd1XYV.tar.zst",
     ps1: "../../package/main.roc",
@@ -108,10 +114,10 @@ main! = |args| {
                 Stdout.line!("verdict: GO (>= 2.00x)")
             } else if cps >= r3000_hz {
                 Stdout.line!("verdict: PERF-FIRST (>= 1.00x, < 2.00x)")
-            } else if ratio_pct >= 30 {
-                Stdout.line!("verdict: FLOOR-OK (>= 0.30x regression floor; 1.00x+ is the ps1-cpu-perf target)")
+            } else if ratio_pct >= 55 {
+                Stdout.line!("verdict: FLOOR-OK (>= 0.55x regression floor; 1.00x arrives with bus wait-state accounting)")
             } else {
-                Stdout.line!("verdict: REGRESSION (< 0.30x floor)")?
+                Stdout.line!("verdict: REGRESSION (< 0.55x floor)")?
                 Err(BelowFloor)
             }
         }

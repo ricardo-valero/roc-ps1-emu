@@ -24,7 +24,37 @@ import /Bit
 # delay-slot exception. EPC = victim - 4 in a slot, else victim. SR
 # pushes its 3-level mode/IE stack; RFE pops it. Vector by SR.BEV.
 Cpu := {
-    r : List(U32),
+    r1 : U32,
+    r2 : U32,
+    r3 : U32,
+    r4 : U32,
+    r5 : U32,
+    r6 : U32,
+    r7 : U32,
+    r8 : U32,
+    r9 : U32,
+    r10 : U32,
+    r11 : U32,
+    r12 : U32,
+    r13 : U32,
+    r14 : U32,
+    r15 : U32,
+    r16 : U32,
+    r17 : U32,
+    r18 : U32,
+    r19 : U32,
+    r20 : U32,
+    r21 : U32,
+    r22 : U32,
+    r23 : U32,
+    r24 : U32,
+    r25 : U32,
+    r26 : U32,
+    r27 : U32,
+    r28 : U32,
+    r29 : U32,
+    r30 : U32,
+    r31 : U32,
     pc : U32,
     hi : U32,
     lo : U32,
@@ -39,7 +69,37 @@ Cpu := {
 }.{
     init : U32 -> Cpu
     init = |pc| {
-        r: List.repeat(0, 32),
+        r1: 0,
+        r2: 0,
+        r3: 0,
+        r4: 0,
+        r5: 0,
+        r6: 0,
+        r7: 0,
+        r8: 0,
+        r9: 0,
+        r10: 0,
+        r11: 0,
+        r12: 0,
+        r13: 0,
+        r14: 0,
+        r15: 0,
+        r16: 0,
+        r17: 0,
+        r18: 0,
+        r19: 0,
+        r20: 0,
+        r21: 0,
+        r22: 0,
+        r23: 0,
+        r24: 0,
+        r25: 0,
+        r26: 0,
+        r27: 0,
+        r28: 0,
+        r29: 0,
+        r30: 0,
+        r31: 0,
         pc: pc,
         hi: 0,
         lo: 0,
@@ -54,10 +114,78 @@ Cpu := {
     }
 
     get : Cpu, U64 -> U32
-    get = |cpu, i| if i == 0 { 0 } else { cpu.r.get(i) ?? 0 }
+    get = |cpu, i|
+        match i {
+            1 => cpu.r1
+            2 => cpu.r2
+            3 => cpu.r3
+            4 => cpu.r4
+            5 => cpu.r5
+            6 => cpu.r6
+            7 => cpu.r7
+            8 => cpu.r8
+            9 => cpu.r9
+            10 => cpu.r10
+            11 => cpu.r11
+            12 => cpu.r12
+            13 => cpu.r13
+            14 => cpu.r14
+            15 => cpu.r15
+            16 => cpu.r16
+            17 => cpu.r17
+            18 => cpu.r18
+            19 => cpu.r19
+            20 => cpu.r20
+            21 => cpu.r21
+            22 => cpu.r22
+            23 => cpu.r23
+            24 => cpu.r24
+            25 => cpu.r25
+            26 => cpu.r26
+            27 => cpu.r27
+            28 => cpu.r28
+            29 => cpu.r29
+            30 => cpu.r30
+            31 => cpu.r31
+            _ => 0
+        }
 
     set_r : Cpu, U64, U32 -> Cpu
-    set_r = |cpu, i, v| if i == 0 { cpu } else { { ..cpu, r: cpu.r.set(i, v) ?? cpu.r } }
+    set_r = |cpu, i, v|
+        match i {
+            1 => { ..cpu, r1: v }
+            2 => { ..cpu, r2: v }
+            3 => { ..cpu, r3: v }
+            4 => { ..cpu, r4: v }
+            5 => { ..cpu, r5: v }
+            6 => { ..cpu, r6: v }
+            7 => { ..cpu, r7: v }
+            8 => { ..cpu, r8: v }
+            9 => { ..cpu, r9: v }
+            10 => { ..cpu, r10: v }
+            11 => { ..cpu, r11: v }
+            12 => { ..cpu, r12: v }
+            13 => { ..cpu, r13: v }
+            14 => { ..cpu, r14: v }
+            15 => { ..cpu, r15: v }
+            16 => { ..cpu, r16: v }
+            17 => { ..cpu, r17: v }
+            18 => { ..cpu, r18: v }
+            19 => { ..cpu, r19: v }
+            20 => { ..cpu, r20: v }
+            21 => { ..cpu, r21: v }
+            22 => { ..cpu, r22: v }
+            23 => { ..cpu, r23: v }
+            24 => { ..cpu, r24: v }
+            25 => { ..cpu, r25: v }
+            26 => { ..cpu, r26: v }
+            27 => { ..cpu, r27: v }
+            28 => { ..cpu, r28: v }
+            29 => { ..cpu, r29: v }
+            30 => { ..cpu, r30: v }
+            31 => { ..cpu, r31: v }
+            _ => cpu
+        }
 
     # exception codes
     exc_adel : U32
@@ -75,42 +203,634 @@ Cpu := {
     exc_ovf : U32
     exc_ovf = 12
 
+    # Fused step: dispatch assigns `var` deltas and the final Cpu record is
+    # built exactly once — the two-phase exec/finish structure with its Out
+    # record measured as the dominant per-instruction cost (see the
+    # ps1-cpu-perf change notes). wrote_i 0 doubles as "no write" ($zero
+    # writes are discarded); load_i 32 means "no pending load".
     step : Cpu, Bus -> { cpu : Cpu, bus : Bus }
     step = |cpu, bus0|
         if cpu.pc.bitwise_and(3) != 0 {
-            # fetch address error: no fetch happens, no opcode for CE
-            take_exception(cpu, bus0, 0, exc_adel, Badv(cpu.pc))
+            take_exception(land_all(cpu), bus0, 0, exc_adel, Badv(cpu.pc))
         } else {
             f = bus0.fetch32(cpu.pc)
-            out = exec(cpu, f.bus, f.val)
-            match out.exc {
-                Exc(e) => {
-                    landed = land_pending(cpu, NoWrite, NoLoad)
-                    take_exception(landed, out.bus, f.val, e.code, e.badv)
+            op = f.val
+            bus_in = f.bus
+            var wrote_i = 0.U64
+            var wrote_v = 0.U32
+            var load_i = 32.U64
+            var load_v = 0.U32
+            var br_arm = Bool.False
+            var br_take = Bool.False
+            var br_target = 0.U32
+            var new_hi = cpu.hi
+            var new_lo = cpu.lo
+            var new_sr = cpu.sr
+            var new_cause = cpu.cause
+            var has_exc = Bool.False
+            var exc_code = 0.U32
+            var exc_badv = 0.U32
+            var has_badv = Bool.False
+            o = Mips.op6(op)
+            rs_i = Mips.rs(op)
+            rt_i = Mips.rt(op)
+            rd_i = Mips.rd(op)
+            a = get(cpu, rs_i)
+            b = get(cpu, rt_i)
+            si = Mips.simm(op)
+            slot_addr =
+                match cpu.branch {
+                    Slot(sb) => if sb.take { sb.target } else { cpu.pc.plus_wrap(4) }
+                    NoBranch => cpu.pc.plus_wrap(4)
+                }
+            bus1 = match o {
+                0 =>
+                    match Mips.funct(op) {
+                        0 => { # SLL
+                            wrote_i = rd_i
+                            wrote_v = b.shl_wrap(Mips.sa(op))
+                            bus_in
+                        }
+
+                        2 => { # SRL
+                            wrote_i = rd_i
+                            wrote_v = b.shr_zf_wrap(Mips.sa(op))
+                            bus_in
+                        }
+
+                        3 => { # SRA
+                            wrote_i = rd_i
+                            wrote_v = sra(b, Mips.sa(op))
+                            bus_in
+                        }
+
+                        4 => { # SLLV
+                            wrote_i = rd_i
+                            wrote_v = b.shl_wrap(a.bitwise_and(31).to_u8_wrap())
+                            bus_in
+                        }
+
+                        6 => { # SRLV
+                            wrote_i = rd_i
+                            wrote_v = b.shr_zf_wrap(a.bitwise_and(31).to_u8_wrap())
+                            bus_in
+                        }
+
+                        7 => { # SRAV
+                            wrote_i = rd_i
+                            wrote_v = sra(b, a.bitwise_and(31).to_u8_wrap())
+                            bus_in
+                        }
+
+                        8 => { # JR
+                            br_arm = Bool.True
+                            br_take = Bool.True
+                            br_target = a
+                            bus_in
+                        }
+
+                        9 => { # JALR
+                            wrote_i = rd_i
+                            wrote_v = slot_addr.plus_wrap(4)
+                            br_arm = Bool.True
+                            br_take = Bool.True
+                            br_target = a
+                            bus_in
+                        }
+
+                        12 => { # SYSCALL
+                            has_exc = Bool.True
+                            exc_code = exc_sys
+                            bus_in
+                        }
+
+                        13 => { # BREAK
+                            has_exc = Bool.True
+                            exc_code = exc_bp
+                            bus_in
+                        }
+
+                        16 => { # MFHI
+                            wrote_i = rd_i
+                            wrote_v = cpu.hi
+                            bus_in
+                        }
+
+                        17 => { # MTHI
+                            new_hi = a
+                            bus_in
+                        }
+
+                        18 => { # MFLO
+                            wrote_i = rd_i
+                            wrote_v = cpu.lo
+                            bus_in
+                        }
+
+                        19 => { # MTLO
+                            new_lo = a
+                            bus_in
+                        }
+
+                        24 => { # MULT
+                            hl = Mips.mult_signed(a, b)
+                            new_hi = hl.hi
+                            new_lo = hl.lo
+                            bus_in
+                        }
+
+                        25 => { # MULTU
+                            hl = Mips.mult_unsigned(a, b)
+                            new_hi = hl.hi
+                            new_lo = hl.lo
+                            bus_in
+                        }
+
+                        26 => { # DIV
+                            hl = Mips.div_signed(a, b)
+                            new_hi = hl.hi
+                            new_lo = hl.lo
+                            bus_in
+                        }
+
+                        27 => { # DIVU
+                            hl = Mips.div_unsigned(a, b)
+                            new_hi = hl.hi
+                            new_lo = hl.lo
+                            bus_in
+                        }
+
+                        32 => { # ADD
+                            sum = a.plus_wrap(b)
+                            if Mips.add_overflows(a, b, sum) {
+                                has_exc = Bool.True
+                                exc_code = exc_ovf
+                            } else {
+                                wrote_i = rd_i
+                                wrote_v = sum
+                            }
+                            bus_in
+                        }
+
+                        33 => { # ADDU
+                            wrote_i = rd_i
+                            wrote_v = a.plus_wrap(b)
+                            bus_in
+                        }
+
+                        34 => { # SUB
+                            diff = a.minus_wrap(b)
+                            if Mips.sub_overflows(a, b, diff) {
+                                has_exc = Bool.True
+                                exc_code = exc_ovf
+                            } else {
+                                wrote_i = rd_i
+                                wrote_v = diff
+                            }
+                            bus_in
+                        }
+
+                        35 => { # SUBU
+                            wrote_i = rd_i
+                            wrote_v = a.minus_wrap(b)
+                            bus_in
+                        }
+
+                        36 => { # AND
+                            wrote_i = rd_i
+                            wrote_v = a.bitwise_and(b)
+                            bus_in
+                        }
+
+                        37 => { # OR
+                            wrote_i = rd_i
+                            wrote_v = a.bitwise_or(b)
+                            bus_in
+                        }
+
+                        38 => { # XOR
+                            wrote_i = rd_i
+                            wrote_v = a.bitwise_xor(b)
+                            bus_in
+                        }
+
+                        39 => { # NOR
+                            wrote_i = rd_i
+                            wrote_v = a.bitwise_or(b).bitwise_not()
+                            bus_in
+                        }
+
+                        42 => { # SLT
+                            wrote_i = rd_i
+                            wrote_v = if Mips.lt_signed(a, b) { 1 } else { 0 }
+                            bus_in
+                        }
+
+                        43 => { # SLTU
+                            wrote_i = rd_i
+                            wrote_v = if a < b { 1 } else { 0 }
+                            bus_in
+                        }
+
+                        _ => {
+                            has_exc = Bool.True
+                            exc_code = exc_ri
+                            bus_in
+                        }
+                    }
+
+                1 => { # REGIMM: BLTZ/BGEZ (+AL); link is unconditional
+                    ge = rt_i.bitwise_and(1) == 1
+                    br_arm = Bool.True
+                    br_take = if ge { a < 0x8000_0000 } else { a >= 0x8000_0000 }
+                    br_target = Mips.branch_target(op, slot_addr)
+                    if rt_i.bitwise_and(0x1E) == 0x10 {
+                        wrote_i = 31
+                        wrote_v = slot_addr.plus_wrap(4)
+                    } else {}
+                    bus_in
                 }
 
-                NoExc => finish(cpu, out)
+                2 => { # J
+                    br_arm = Bool.True
+                    br_take = Bool.True
+                    br_target = Mips.jump_target(op, slot_addr)
+                    bus_in
+                }
+
+                3 => { # JAL
+                    wrote_i = 31
+                    wrote_v = slot_addr.plus_wrap(4)
+                    br_arm = Bool.True
+                    br_take = Bool.True
+                    br_target = Mips.jump_target(op, slot_addr)
+                    bus_in
+                }
+
+                4 => { # BEQ
+                    br_arm = Bool.True
+                    br_take = a == b
+                    br_target = Mips.branch_target(op, slot_addr)
+                    bus_in
+                }
+
+                5 => { # BNE
+                    br_arm = Bool.True
+                    br_take = a != b
+                    br_target = Mips.branch_target(op, slot_addr)
+                    bus_in
+                }
+
+                6 => { # BLEZ
+                    br_arm = Bool.True
+                    br_take = a == 0 or a >= 0x8000_0000
+                    br_target = Mips.branch_target(op, slot_addr)
+                    bus_in
+                }
+
+                7 => { # BGTZ
+                    br_arm = Bool.True
+                    br_take = a != 0 and a < 0x8000_0000
+                    br_target = Mips.branch_target(op, slot_addr)
+                    bus_in
+                }
+
+                8 => { # ADDI
+                    sum = a.plus_wrap(si)
+                    if Mips.add_overflows(a, si, sum) {
+                        has_exc = Bool.True
+                        exc_code = exc_ovf
+                    } else {
+                        wrote_i = rt_i
+                        wrote_v = sum
+                    }
+                    bus_in
+                }
+
+                9 => { # ADDIU
+                    wrote_i = rt_i
+                    wrote_v = a.plus_wrap(si)
+                    bus_in
+                }
+
+                10 => { # SLTI
+                    wrote_i = rt_i
+                    wrote_v = if Mips.lt_signed(a, si) { 1 } else { 0 }
+                    bus_in
+                }
+
+                11 => { # SLTIU
+                    wrote_i = rt_i
+                    wrote_v = if a < si { 1 } else { 0 }
+                    bus_in
+                }
+
+                12 => { # ANDI
+                    wrote_i = rt_i
+                    wrote_v = a.bitwise_and(Mips.imm(op))
+                    bus_in
+                }
+
+                13 => { # ORI
+                    wrote_i = rt_i
+                    wrote_v = a.bitwise_or(Mips.imm(op))
+                    bus_in
+                }
+
+                14 => { # XORI
+                    wrote_i = rt_i
+                    wrote_v = a.bitwise_xor(Mips.imm(op))
+                    bus_in
+                }
+
+                15 => { # LUI
+                    wrote_i = rt_i
+                    wrote_v = Mips.imm(op).shl_wrap(16)
+                    bus_in
+                }
+
+                16 => # COP0
+                    match rs_i {
+                        0 => { # MFC0 (load-delayed)
+                            load_i = rt_i
+                            load_v = cop0_read(cpu, rd_i)
+                            bus_in
+                        }
+
+                        4 =>
+                            match rd_i { # MTC0
+                                12 => {
+                                    new_sr = b
+                                    bus_in
+                                }
+
+                                13 => {
+                                    new_cause = cpu.cause.bitwise_and(0xFFFF_FCFF).bitwise_or(b.bitwise_and(0x0000_0300))
+                                    bus_in
+                                }
+
+                                                _ => bus_in # other cop0 registers: ignored for now
+                            }
+
+                        16 =>
+                            if Mips.funct(op) == 16 { # RFE
+                                new_sr = cpu.sr.bitwise_and(0xFFFF_FFF0).bitwise_or(cpu.sr.shr_zf_wrap(2).bitwise_and(0x0F))
+                                bus_in
+                            } else {
+                                has_exc = Bool.True
+                                exc_code = exc_ri
+                                bus_in
+                            }
+
+                        _ => {
+                            has_exc = Bool.True
+                            exc_code = exc_ri
+                            bus_in
+                        }
+                    }
+
+                18 => { # COP2: GTE arrives in its own change
+                    has_exc = Bool.True
+                    exc_code = exc_cpu
+                    bus_in
+                }
+
+                32 => { # LB
+                    rr = bus_in.read(1, a.plus_wrap(si))
+                    load_i = rt_i
+                    load_v = Bit.sext8(rr.val)
+                    rr.bus
+                }
+
+                33 => { # LH
+                    va = a.plus_wrap(si)
+                    if va.bitwise_and(1) != 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_adel
+                        has_badv = Bool.True
+                        exc_badv = va
+                        bus_in
+                    } else {
+                        rr = bus_in.read(2, va)
+                        load_i = rt_i
+                        load_v = Bit.sext16(rr.val)
+                        rr.bus
+                    }
+                }
+
+                34 => { # LWL: read the (sh+1) bytes ending at va (1-2 accesses)
+                    va = a.plus_wrap(si)
+                    sh = va.bitwise_and(3)
+                    aligned = va.bitwise_and(0xFFFF_FFFC)
+                    merge_base =
+                        match cpu.load {
+                            Pending(p) => if p.reg == rt_i { p.val } else { b }
+                            NoLoad => b
+                        }
+                    got =
+                        if sh == 0 {
+                            rr = bus_in.read(1, va)
+                            { bus: rr.bus, data: rr.val.bitwise_and(0xFF) }
+                        } else if sh == 1 {
+                            rr = bus_in.read(2, aligned)
+                            { bus: rr.bus, data: rr.val.bitwise_and(0xFFFF) }
+                        } else if sh == 2 {
+                            r1 = bus_in.read(2, aligned)
+                            r2 = r1.bus.read(1, aligned.plus_wrap(2))
+                            { bus: r2.bus, data: r1.val.bitwise_and(0xFFFF).bitwise_or(r2.val.bitwise_and(0xFF).shl_wrap(16)) }
+                        } else {
+                            rr = bus_in.read(4, aligned)
+                            { bus: rr.bus, data: rr.val }
+                        }
+                    load_i = rt_i
+                    load_v = Mips.lwl_merge(merge_base, got.data, sh)
+                    got.bus
+                }
+
+                35 => { # LW
+                    va = a.plus_wrap(si)
+                    if va.bitwise_and(3) != 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_adel
+                        has_badv = Bool.True
+                        exc_badv = va
+                        bus_in
+                    } else {
+                        rr = bus_in.read(4, va)
+                        load_i = rt_i
+                        load_v = rr.val
+                        rr.bus
+                    }
+                }
+
+                36 => { # LBU
+                    rr = bus_in.read(1, a.plus_wrap(si))
+                    load_i = rt_i
+                    load_v = rr.val.bitwise_and(0xFF)
+                    rr.bus
+                }
+
+                37 => { # LHU
+                    va = a.plus_wrap(si)
+                    if va.bitwise_and(1) != 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_adel
+                        has_badv = Bool.True
+                        exc_badv = va
+                        bus_in
+                    } else {
+                        rr = bus_in.read(2, va)
+                        load_i = rt_i
+                        load_v = rr.val.bitwise_and(0xFFFF)
+                        rr.bus
+                    }
+                }
+
+                38 => { # LWR: read the (4-sh) bytes starting at va (1-2 accesses)
+                    va = a.plus_wrap(si)
+                    sh = va.bitwise_and(3)
+                    merge_base =
+                        match cpu.load {
+                            Pending(p) => if p.reg == rt_i { p.val } else { b }
+                            NoLoad => b
+                        }
+                    got =
+                        if sh == 0 {
+                            rr = bus_in.read(4, va)
+                            { bus: rr.bus, data: rr.val }
+                        } else if sh == 1 {
+                            r1 = bus_in.read(1, va)
+                            r2 = r1.bus.read(2, va.plus_wrap(1))
+                            { bus: r2.bus, data: r1.val.bitwise_and(0xFF).bitwise_or(r2.val.bitwise_and(0xFFFF).shl_wrap(8)) }
+                        } else if sh == 2 {
+                            rr = bus_in.read(2, va)
+                            { bus: rr.bus, data: rr.val.bitwise_and(0xFFFF) }
+                        } else {
+                            rr = bus_in.read(1, va)
+                            { bus: rr.bus, data: rr.val.bitwise_and(0xFF) }
+                        }
+                    load_i = rt_i
+                    load_v = Mips.lwr_merge(merge_base, got.data, sh)
+                    got.bus
+                }
+
+                40 => bus_in.write(1, a.plus_wrap(si), b) # SB
+
+                41 => { # SH
+                    va = a.plus_wrap(si)
+                    if va.bitwise_and(1) != 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_ades
+                        has_badv = Bool.True
+                        exc_badv = va
+                        bus_in
+                    } else {
+                        bus_in.write(2, va, b)
+                    }
+                }
+
+                42 => { # SWL: store rt's top (sh+1) bytes ending at va (1-2 accesses)
+                    va = a.plus_wrap(si)
+                    sh = va.bitwise_and(3)
+                    aligned = va.bitwise_and(0xFFFF_FFFC)
+                    if sh == 0 {
+                        bus_in.write(1, va, b.shr_zf_wrap(24))
+                    } else if sh == 1 {
+                        bus_in.write(2, aligned, b.shr_zf_wrap(16))
+                    } else if sh == 2 {
+                        bus_in.write(2, aligned, b.shr_zf_wrap(8)).write(1, aligned.plus_wrap(2), b.shr_zf_wrap(24))
+                    } else {
+                        bus_in.write(4, aligned, b)
+                    }
+                }
+
+                43 => { # SW
+                    va = a.plus_wrap(si)
+                    if va.bitwise_and(3) != 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_ades
+                        has_badv = Bool.True
+                        exc_badv = va
+                        bus_in
+                    } else {
+                        bus_in.write(4, va, b)
+                    }
+                }
+
+                46 => { # SWR: store rt's bottom (4-sh) bytes starting at va (1-2 accesses)
+                    va = a.plus_wrap(si)
+                    sh = va.bitwise_and(3)
+                    if sh == 0 {
+                        bus_in.write(4, va, b)
+                    } else if sh == 1 {
+                        bus_in.write(1, va, b).write(2, va.plus_wrap(1), b.shr_zf_wrap(8))
+                    } else if sh == 2 {
+                        bus_in.write(2, va, b)
+                    } else {
+                        bus_in.write(1, va, b)
+                    }
+                }
+
+                50 => { # LWC2
+                    has_exc = Bool.True
+                    exc_code = exc_cpu
+                    bus_in
+                }
+
+                58 => { # SWC2
+                    has_exc = Bool.True
+                    exc_code = exc_cpu
+                    bus_in
+                }
+
+                _ => {
+                    has_exc = Bool.True
+                    exc_code = exc_ri
+                    bus_in
+                }
+            }
+            if has_exc {
+                take_exception(land_all(cpu), bus1, op, exc_code, if has_badv { Badv(exc_badv) } else { NoBadv })
+            } else {
+                new_pc =
+                    match cpu.branch {
+                        Slot(bh) => if bh.take { bh.target } else { cpu.pc.plus_wrap(4) }
+                        NoBranch => cpu.pc.plus_wrap(4)
+                    }
+                landed =
+                    match cpu.load {
+                        NoLoad => cpu
+                        Pending(p) =>
+                            if p.reg == wrote_i or p.reg == load_i {
+                                cpu
+                            } else {
+                                set_r(cpu, p.reg, p.val)
+                            }
+                    }
+                written = if wrote_i == 0 { landed } else { set_r(landed, wrote_i, wrote_v) }
+                {
+                    cpu: { ..written,
+                        pc: new_pc,
+                        hi: new_hi,
+                        lo: new_lo,
+                        sr: new_sr,
+                        cause: new_cause,
+                        branch: if br_arm { Slot({ take: br_take, target: br_target }) } else { NoBranch },
+                        load: if load_i < 32 { Pending({ reg: load_i, val: load_v }) } else { NoLoad },
+                        cycles: cpu.cycles.plus(1),
+                    },
+                    bus: bus1,
+                }
             }
         }
 
-    # pending load lands unless the instruction wrote or re-loaded the register
-    land_pending : Cpu, [NoWrite, Wrote(U64, U32)], [NoLoad, Pending({ reg : U64, val : U32 })] -> Cpu
-    land_pending = |cpu, wrote, new_load|
+    # pending load lands unconditionally (exception path; a faulting
+    # instruction wrote nothing and loaded nothing)
+    land_all : Cpu -> Cpu
+    land_all = |cpu|
         match cpu.load {
             NoLoad => cpu
-            Pending(p) => {
-                blocked_w =
-                    match wrote {
-                        Wrote(wi, _) => wi == p.reg
-                        NoWrite => Bool.False
-                    }
-                blocked_l =
-                    match new_load {
-                        Pending(n) => n.reg == p.reg
-                        NoLoad => Bool.False
-                    }
-                if blocked_w or blocked_l { cpu } else { cpu.set_r(p.reg, p.val) }
-            }
+            Pending(p) => set_r(cpu, p.reg, p.val)
         }
 
     take_exception : Cpu, Bus, U32, U32, [NoBadv, Badv(U32)] -> { cpu : Cpu, bus : Bus }
@@ -152,65 +872,6 @@ Cpu := {
         }
     }
 
-    # single record construction per step: the fleet's perf lesson is that
-    # chained { ..cpu } spread-copies dominate the per-instruction cost
-    finish : Cpu, _ -> { cpu : Cpu, bus : Bus }
-    finish = |cpu, out| {
-        new_pc =
-            match cpu.branch {
-                Slot(b) => if b.take { b.target } else { cpu.pc.plus_wrap(4) }
-                NoBranch => cpu.pc.plus_wrap(4)
-            }
-        r1 =
-            match cpu.load {
-                NoLoad => cpu.r
-                Pending(p) => {
-                    blocked_w =
-                        match out.wrote {
-                            Wrote(wi, _) => wi == p.reg
-                            NoWrite => Bool.False
-                        }
-                    blocked_l =
-                        match out.new_load {
-                            Pending(n) => n.reg == p.reg
-                            NoLoad => Bool.False
-                        }
-                    if blocked_w or blocked_l or p.reg == 0 { cpu.r } else { cpu.r.set(p.reg, p.val) ?? cpu.r }
-                }
-            }
-        r2 =
-            match out.wrote {
-                Wrote(wi, wv) => if wi == 0 { r1 } else { r1.set(wi, wv) ?? r1 }
-                NoWrite => r1
-            }
-        hilo =
-            match out.hilo {
-                SetHiLo(h, l) => { hi: h, lo: l }
-                KeepHiLo => { hi: cpu.hi, lo: cpu.lo }
-            }
-        src =
-            match out.cop0 {
-                SetSr(v) => { sr: v, cause: cpu.cause }
-                SetCause(v) => { sr: cpu.sr, cause: cpu.cause.bitwise_and(0xFFFF_FCFF).bitwise_or(v.bitwise_and(0x0000_0300)) }
-                Rfe => { sr: cpu.sr.bitwise_and(0xFFFF_FFF0).bitwise_or(cpu.sr.shr_zf_wrap(2).bitwise_and(0x0F)), cause: cpu.cause }
-                KeepCop0 => { sr: cpu.sr, cause: cpu.cause }
-            }
-        {
-            cpu: { ..cpu,
-                r: r2,
-                pc: new_pc,
-                hi: hilo.hi,
-                lo: hilo.lo,
-                sr: src.sr,
-                cause: src.cause,
-                branch: out.new_branch,
-                load: out.new_load,
-                cycles: cpu.cycles.plus(1),
-            },
-            bus: out.bus,
-        }
-    }
-
     cop0_read : Cpu, U64 -> U32
     cop0_read = |cpu, reg|
         match reg {
@@ -222,246 +883,6 @@ Cpu := {
             15 => 0x0000_0002 # PRId: R3000A as found in the PSX
             _ => 0
         }
-
-    # one instruction: returns deltas for finish/step to resolve
-    exec : Cpu, Bus, U32 -> _
-    exec = |cpu, bus, op| {
-        none = { bus: bus, wrote: NoWrite, new_load: NoLoad, new_branch: NoBranch, hilo: KeepHiLo, cop0: KeepCop0, exc: NoExc }
-        o = Mips.op6(op)
-        rs_i = Mips.rs(op)
-        rt_i = Mips.rt(op)
-        rd_i = Mips.rd(op)
-        a = cpu.get(rs_i)
-        b = cpu.get(rt_i)
-        si = Mips.simm(op)
-        zi = Mips.imm(op)
-        # branch/jump targets and link addresses are relative to where the
-        # delay slot actually is: pc+4 normally, the pending destination
-        # inside a taken delay slot (pinned by the in-slot vector cases)
-        slot_addr =
-            match cpu.branch {
-                Slot(sb) => if sb.take { sb.target } else { cpu.pc.plus_wrap(4) }
-                NoBranch => cpu.pc.plus_wrap(4)
-            }
-        link = slot_addr.plus_wrap(4)
-        btarget = Mips.branch_target(op, slot_addr)
-        vaddr = a.plus_wrap(si)
-        # pending value reads through for LWL/LWR merges
-        merge_base =
-            match cpu.load {
-                Pending(p) => if p.reg == rt_i { p.val } else { b }
-                NoLoad => b
-            }
-        match o {
-            0 =>
-                match Mips.funct(op) {
-                    0 => { ..none, wrote: Wrote(rd_i, b.shl_wrap(Mips.sa(op))) } # SLL
-                    2 => { ..none, wrote: Wrote(rd_i, b.shr_zf_wrap(Mips.sa(op))) } # SRL
-                    3 => { ..none, wrote: Wrote(rd_i, sra(b, Mips.sa(op))) } # SRA
-                    4 => { ..none, wrote: Wrote(rd_i, b.shl_wrap(a.bitwise_and(31).to_u8_wrap())) } # SLLV
-                    6 => { ..none, wrote: Wrote(rd_i, b.shr_zf_wrap(a.bitwise_and(31).to_u8_wrap())) } # SRLV
-                    7 => { ..none, wrote: Wrote(rd_i, sra(b, a.bitwise_and(31).to_u8_wrap())) } # SRAV
-                    8 => { ..none, new_branch: Slot({ take: Bool.True, target: a }) } # JR
-                    9 => { ..none, wrote: Wrote(rd_i, link), new_branch: Slot({ take: Bool.True, target: a }) } # JALR
-                    12 => { ..none, exc: Exc({ code: exc_sys, badv: NoBadv }) } # SYSCALL
-                    13 => { ..none, exc: Exc({ code: exc_bp, badv: NoBadv }) } # BREAK
-                    16 => { ..none, wrote: Wrote(rd_i, cpu.hi) } # MFHI
-                    17 => { ..none, hilo: SetHiLo(a, cpu.lo) } # MTHI
-                    18 => { ..none, wrote: Wrote(rd_i, cpu.lo) } # MFLO
-                    19 => { ..none, hilo: SetHiLo(cpu.hi, a) } # MTLO
-                    24 => { ..none, hilo: hilo_of(Mips.mult_signed(a, b)) } # MULT
-                    25 => { ..none, hilo: hilo_of(Mips.mult_unsigned(a, b)) } # MULTU
-                    26 => { ..none, hilo: hilo_of(Mips.div_signed(a, b)) } # DIV
-                    27 => { ..none, hilo: hilo_of(Mips.div_unsigned(a, b)) } # DIVU
-                    32 => { # ADD
-                        sum = a.plus_wrap(b)
-                        if Mips.add_overflows(a, b, sum) { { ..none, exc: Exc({ code: exc_ovf, badv: NoBadv }) } } else { { ..none, wrote: Wrote(rd_i, sum) } }
-                    }
-
-                    33 => { ..none, wrote: Wrote(rd_i, a.plus_wrap(b)) } # ADDU
-                    34 => { # SUB
-                        diff = a.minus_wrap(b)
-                        if Mips.sub_overflows(a, b, diff) { { ..none, exc: Exc({ code: exc_ovf, badv: NoBadv }) } } else { { ..none, wrote: Wrote(rd_i, diff) } }
-                    }
-
-                    35 => { ..none, wrote: Wrote(rd_i, a.minus_wrap(b)) } # SUBU
-                    36 => { ..none, wrote: Wrote(rd_i, a.bitwise_and(b)) } # AND
-                    37 => { ..none, wrote: Wrote(rd_i, a.bitwise_or(b)) } # OR
-                    38 => { ..none, wrote: Wrote(rd_i, a.bitwise_xor(b)) } # XOR
-                    39 => { ..none, wrote: Wrote(rd_i, a.bitwise_or(b).bitwise_not()) } # NOR
-                    42 => { ..none, wrote: Wrote(rd_i, if Mips.lt_signed(a, b) { 1 } else { 0 }) } # SLT
-                    43 => { ..none, wrote: Wrote(rd_i, if a < b { 1 } else { 0 }) } # SLTU
-                    _ => { ..none, exc: Exc({ code: exc_ri, badv: NoBadv }) }
-                }
-
-            1 => { # REGIMM: BLTZ/BGEZ (+AL); link is unconditional
-                ge = rt_i.bitwise_and(1) == 1
-                taken = if ge { a < 0x8000_0000 } else { a >= 0x8000_0000 }
-                with_branch = { ..none, new_branch: Slot({ take: taken, target: btarget }) }
-                if rt_i.bitwise_and(0x1E) == 0x10 {
-                    { ..with_branch, wrote: Wrote(31, link) }
-                } else {
-                    with_branch
-                }
-            }
-
-            2 => { ..none, new_branch: Slot({ take: Bool.True, target: Mips.jump_target(op, slot_addr) }) } # J
-            3 => { ..none, wrote: Wrote(31, link), new_branch: Slot({ take: Bool.True, target: Mips.jump_target(op, slot_addr) }) } # JAL
-            4 => { ..none, new_branch: Slot({ take: a == b, target: btarget }) } # BEQ
-            5 => { ..none, new_branch: Slot({ take: a != b, target: btarget }) } # BNE
-            6 => { ..none, new_branch: Slot({ take: a == 0 or a >= 0x8000_0000, target: btarget }) } # BLEZ
-            7 => { ..none, new_branch: Slot({ take: a != 0 and a < 0x8000_0000, target: btarget }) } # BGTZ
-            8 => { # ADDI
-                sum = a.plus_wrap(si)
-                if Mips.add_overflows(a, si, sum) { { ..none, exc: Exc({ code: exc_ovf, badv: NoBadv }) } } else { { ..none, wrote: Wrote(rt_i, sum) } }
-            }
-
-            9 => { ..none, wrote: Wrote(rt_i, a.plus_wrap(si)) } # ADDIU
-            10 => { ..none, wrote: Wrote(rt_i, if Mips.lt_signed(a, si) { 1 } else { 0 }) } # SLTI
-            11 => { ..none, wrote: Wrote(rt_i, if a < si { 1 } else { 0 }) } # SLTIU
-            12 => { ..none, wrote: Wrote(rt_i, a.bitwise_and(zi)) } # ANDI
-            13 => { ..none, wrote: Wrote(rt_i, a.bitwise_or(zi)) } # ORI
-            14 => { ..none, wrote: Wrote(rt_i, a.bitwise_xor(zi)) } # XORI
-            15 => { ..none, wrote: Wrote(rt_i, zi.shl_wrap(16)) } # LUI
-            16 => # COP0
-                match rs_i {
-                    0 => { ..none, new_load: Pending({ reg: rt_i, val: cop0_read(cpu, rd_i) }) } # MFC0 (load-delayed)
-                    4 =>
-                        match rd_i { # MTC0
-                            12 => { ..none, cop0: SetSr(b) }
-                            13 => { ..none, cop0: SetCause(b) }
-                            _ => none # other cop0 registers: ignored for now
-                        }
-
-                    16 => if Mips.funct(op) == 16 { { ..none, cop0: Rfe } } else { { ..none, exc: Exc({ code: exc_ri, badv: NoBadv }) } }
-                    _ => { ..none, exc: Exc({ code: exc_ri, badv: NoBadv }) }
-                }
-
-            18 => { ..none, exc: Exc({ code: exc_cpu, badv: NoBadv }) } # COP2: GTE arrives in its own change
-            32 => { # LB
-                rr = bus.read(1, vaddr)
-                { ..none, bus: rr.bus, new_load: Pending({ reg: rt_i, val: Bit.sext8(rr.val) }) }
-            }
-
-            33 => # LH
-                if vaddr.bitwise_and(1) != 0 {
-                    { ..none, exc: Exc({ code: exc_adel, badv: Badv(vaddr) }) }
-                } else {
-                    rr = bus.read(2, vaddr)
-                    { ..none, bus: rr.bus, new_load: Pending({ reg: rt_i, val: Bit.sext16(rr.val) }) }
-                }
-
-            34 => { # LWL: read the (sh+1) bytes ending at vaddr (1-2 accesses)
-                sh = vaddr.bitwise_and(3)
-                aligned = vaddr.bitwise_and(0xFFFF_FFFC)
-                got =
-                    if sh == 0 {
-                        rr = bus.read(1, vaddr)
-                        { bus: rr.bus, data: rr.val.bitwise_and(0xFF) }
-                    } else if sh == 1 {
-                        rr = bus.read(2, aligned)
-                        { bus: rr.bus, data: rr.val.bitwise_and(0xFFFF) }
-                    } else if sh == 2 {
-                        r1 = bus.read(2, aligned)
-                        r2 = r1.bus.read(1, aligned.plus_wrap(2))
-                        { bus: r2.bus, data: r1.val.bitwise_and(0xFFFF).bitwise_or(r2.val.bitwise_and(0xFF).shl_wrap(16)) }
-                    } else {
-                        rr = bus.read(4, aligned)
-                        { bus: rr.bus, data: rr.val }
-                    }
-                { ..none, bus: got.bus, new_load: Pending({ reg: rt_i, val: Mips.lwl_merge(merge_base, got.data, sh) }) }
-            }
-
-            35 => # LW
-                if vaddr.bitwise_and(3) != 0 {
-                    { ..none, exc: Exc({ code: exc_adel, badv: Badv(vaddr) }) }
-                } else {
-                    rr = bus.read(4, vaddr)
-                    { ..none, bus: rr.bus, new_load: Pending({ reg: rt_i, val: rr.val }) }
-                }
-
-            36 => { # LBU
-                rr = bus.read(1, vaddr)
-                { ..none, bus: rr.bus, new_load: Pending({ reg: rt_i, val: rr.val.bitwise_and(0xFF) }) }
-            }
-
-            37 => # LHU
-                if vaddr.bitwise_and(1) != 0 {
-                    { ..none, exc: Exc({ code: exc_adel, badv: Badv(vaddr) }) }
-                } else {
-                    rr = bus.read(2, vaddr)
-                    { ..none, bus: rr.bus, new_load: Pending({ reg: rt_i, val: rr.val.bitwise_and(0xFFFF) }) }
-                }
-
-            38 => { # LWR: read the (4-sh) bytes starting at vaddr (1-2 accesses)
-                sh = vaddr.bitwise_and(3)
-                got =
-                    if sh == 0 {
-                        rr = bus.read(4, vaddr)
-                        { bus: rr.bus, data: rr.val }
-                    } else if sh == 1 {
-                        r1 = bus.read(1, vaddr)
-                        r2 = r1.bus.read(2, vaddr.plus_wrap(1))
-                        { bus: r2.bus, data: r1.val.bitwise_and(0xFF).bitwise_or(r2.val.bitwise_and(0xFFFF).shl_wrap(8)) }
-                    } else if sh == 2 {
-                        rr = bus.read(2, vaddr)
-                        { bus: rr.bus, data: rr.val.bitwise_and(0xFFFF) }
-                    } else {
-                        rr = bus.read(1, vaddr)
-                        { bus: rr.bus, data: rr.val.bitwise_and(0xFF) }
-                    }
-                { ..none, bus: got.bus, new_load: Pending({ reg: rt_i, val: Mips.lwr_merge(merge_base, got.data, sh) }) }
-            }
-
-            40 => { ..none, bus: bus.write(1, vaddr, b) } # SB
-            41 => # SH
-                if vaddr.bitwise_and(1) != 0 {
-                    { ..none, exc: Exc({ code: exc_ades, badv: Badv(vaddr) }) }
-                } else {
-                    { ..none, bus: bus.write(2, vaddr, b) }
-                }
-
-            42 => { # SWL: store rt's top (sh+1) bytes ending at vaddr (1-2 accesses)
-                sh = vaddr.bitwise_and(3)
-                aligned = vaddr.bitwise_and(0xFFFF_FFFC)
-                if sh == 0 {
-                    { ..none, bus: bus.write(1, vaddr, b.shr_zf_wrap(24)) }
-                } else if sh == 1 {
-                    { ..none, bus: bus.write(2, aligned, b.shr_zf_wrap(16)) }
-                } else if sh == 2 {
-                    { ..none, bus: bus.write(2, aligned, b.shr_zf_wrap(8)).write(1, aligned.plus_wrap(2), b.shr_zf_wrap(24)) }
-                } else {
-                    { ..none, bus: bus.write(4, aligned, b) }
-                }
-            }
-
-            43 => # SW
-                if vaddr.bitwise_and(3) != 0 {
-                    { ..none, exc: Exc({ code: exc_ades, badv: Badv(vaddr) }) }
-                } else {
-                    { ..none, bus: bus.write(4, vaddr, b) }
-                }
-
-            46 => { # SWR: store rt's bottom (4-sh) bytes starting at vaddr (1-2 accesses)
-                sh = vaddr.bitwise_and(3)
-                if sh == 0 {
-                    { ..none, bus: bus.write(4, vaddr, b) }
-                } else if sh == 1 {
-                    { ..none, bus: bus.write(1, vaddr, b).write(2, vaddr.plus_wrap(1), b.shr_zf_wrap(8)) }
-                } else if sh == 2 {
-                    { ..none, bus: bus.write(2, vaddr, b) }
-                } else {
-                    { ..none, bus: bus.write(1, vaddr, b) }
-                }
-            }
-
-            50 => { ..none, exc: Exc({ code: exc_cpu, badv: NoBadv }) } # LWC2
-            58 => { ..none, exc: Exc({ code: exc_cpu, badv: NoBadv }) } # SWC2
-            _ => { ..none, exc: Exc({ code: exc_ri, badv: NoBadv }) }
-        }
-    }
-
-    hilo_of = |hl| SetHiLo(hl.hi, hl.lo)
 
     # arithmetic shift right: ~(~v >> n) sign-fills without variable masks
     sra : U32, U8 -> U32
