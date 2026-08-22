@@ -27,17 +27,27 @@ ticked as changes archive.
   (GBA precedent: 1.08x flat → 2.6x real bus). Decode cache is the
   known lever beyond that.
 
+- [x] **Memory bus + EXE sideload** — Ps1 bus variant with the RAM
+  paged OUTSIDE the bus (the compiler's four "poison laws" against
+  in-place list updates are documented in the change's design as-built,
+  with the val-only read API and store/read intents they forced),
+  scratchpad, BIOS window, wait-state accounting, I_STAT/I_MASK with
+  CAUSE.IP2 mirror + delivery, SR.IsC, PS-EXE sideloader, kernel-vector
+  TTY trap (putchar/puts/mini-printf/FlushCache) and idle-GPU/pad
+  stubs. Gated by Amidog psxtest_cpu — green (Result 00000101 = the
+  all-pass signature, convention reverse-engineered); psxtest_cpx
+  excluded until the GTE change (coprocessor semantics). Real-bus bench
+  1.79x (≥ 1.00x floor); flat floor re-recorded 0.30x for the heavier
+  step shape.
+
 ## Next
 
-- [ ] **Memory bus + EXE sideload** — memory map (RAM, scratchpad,
-  BIOS window, I/O stubs), IRQ controller skeleton, PS-EXE loader.
-  Sideloading is the key move: the entire test corpus (Amidog,
-  ps1-tests) is PS-EXEs, so every later subsystem gates without any
-  CD-ROM emulation.
 - [ ] **DMA + timers + interrupts** — 7 DMA channels including OT
   chain-following, root counters, IRQ delivery. Gated by ps1-tests
-  DMA/timer EXEs. Root counter 1 (hblank) accuracy lands here — CTR
-  measures real time with it.
+  DMA/timer EXEs (including cpu/access-time, deferred from the bus
+  change: it measures with root counters and will calibrate the wait
+  table). Root counter 1 (hblank) accuracy lands here — CTR measures
+  real time with it.
 - [ ] **GPU core** — command FIFO + software rasterizer into 1 MB VRAM.
   Gated by ps1-tests VRAM dumps diffed against hardware-captured
   references (the house frozen-digest workflow, upstream-supplied).

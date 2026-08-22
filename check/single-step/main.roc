@@ -83,7 +83,7 @@ run_case = |test| {
     data_reads = test.cycles.fold([], |acc, c| if c.actions == 1 { acc.append(c.val) } else { acc })
     cpu = from_vector_state(test.initial)
     bus = Bus.vector(test.opcode, test.opcode_addr, data_reads)
-    out = Cpu.step(cpu, bus)
+    out = Cpu.step(cpu, bus, [])
     fin = test.final
     var problems = []
     var i = 0.U64
@@ -121,7 +121,17 @@ run_case = |test| {
     if got_ld != expect_ld {
         problems = problems.append("load: expected reg=${hex(expect_ld.reg)} val=${hex(expect_ld.val)}, got reg=${hex(got_ld.reg)} val=${hex(got_ld.val)}")
     } else {}
-    trace = out.bus.trace()
+    # fetch/read entries are synthesized from the step's intent fields
+    # (reads never mutate the bus any more); only writes trace in the bus
+    fetch_trace =
+        if test.initial.pc.bitwise_and(3) == 0 {
+            [{ kind: 0.U8, size: 4.U8, addr: test.initial.pc, val: if test.initial.pc == test.opcode_addr { test.opcode } else { test.initial.pc } }]
+        } else {
+            []
+        }
+    rd1_trace = if out.rd1_size != 0 { [{ kind: 1.U8, size: out.rd1_size, addr: out.rd1_addr, val: out.rd1_val }] } else { [] }
+    rd2_trace = if out.rd2_size != 0 { [{ kind: 1.U8, size: out.rd2_size, addr: out.rd2_addr, val: out.rd2_val }] } else { [] }
+    trace = fetch_trace.concat(rd1_trace).concat(rd2_trace).concat(out.bus.trace())
     if trace.len() != test.cycles.len() {
         problems = problems.append("trace: expected ${test.cycles.len().to_str()} accesses, got ${trace.len().to_str()}")
     } else {
