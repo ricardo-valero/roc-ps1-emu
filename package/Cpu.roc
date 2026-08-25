@@ -1015,7 +1015,7 @@ Cpu := {
                 # hoisted OUT of the return-record literal: a conditional
                 # inside the record build re-poisons the bus copy (law 4)
                 ack_rphys = rd1_addr.bitwise_and(0x1FFF_FFFF)
-                ack_is_mode = rd1_size != 0 and ack_rphys >= 0x1F80_1100 and ack_rphys < 0x1F80_1130 and ack_rphys.bitwise_and(0xF) == 4
+                ack_is_mode = rd1_size != 0 and ((ack_rphys >= 0x1F80_1100 and ack_rphys < 0x1F80_1130 and ack_rphys.bitwise_and(0xF) == 4) or ack_rphys == 0x1F80_1810)
                 ack_v = if ack_is_mode { rd1_addr } else { 0 }
                 new_pc =
                     match cpu.branch {

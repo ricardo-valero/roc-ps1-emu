@@ -1,3 +1,5 @@
+import /Gpu
+
 # The CPU's memory surface. Three variants:
 #
 #   Ps1 — the real console map: 2 MB RAM mirrored through
@@ -40,7 +42,9 @@ Ps1Rest : {
     # poisoned on our nightly, a list pointer is the safe equivalent).
     # Slots: timers 0-14 (mode,target,anchor_clock,anchor_base,reached
     # x3), DMA 15-35 (madr,bcr,chcr x7), 36 dpcr, 37 dicr, 38 joy_ctrl,
-    # 39 joy_seq, 40 joy_xact, 41 joy_rx, 42 spucnt, 43 hook_buf.
+    # 39 joy_seq, 40 joy_xact, 41 joy_rx, 42 spucnt, 43 hook_buf,
+    # 44-59 GPU state (see Gpu.roc's slot map; 59 = GP1 09h
+    # texture-disable-allow).
     dev : List(U64),
     exc_ctx : List(U32), # register file saved at HLE interrupt dispatch ([r1..r31, hi, lo, epc]) for B0:0x17
     tty_trap : Bool,
@@ -67,7 +71,7 @@ Bus := [
             i_mask: 0,
             ram_size: 0,
             cache_ctrl: 0,
-            dev: List.repeat(0.U64, 44).set(36, 0x0765_4321) ?? List.repeat(0.U64, 44), # dpcr reset (psx-spx)
+            dev: (List.repeat(0.U64, 60).set(36, 0x0765_4321) ?? List.repeat(0.U64, 60)).set(46, 1) ?? List.repeat(0.U64, 60), # dpcr reset; display disabled at power-on
             exc_ctx: [],
             tty_trap: tty_trap,
             tty: [],
@@ -352,7 +356,7 @@ Bus := [
     # channel; DPCR writes re-scan all channels for armed+enabled ones).
     # Start needs CHCR bit 24, DPCR's enable bit for the channel, manual
     # trigger (bit 28) when sync mode 0, and OTC only supports mode 0.
-    dma_kick_info : Bus, U32 -> { ch : U32, madr : U32, bcr : U32, go : Bool }
+    dma_kick_info : Bus, U32 -> { ch : U32, madr : U32, bcr : U32, chcr : U32, go : Bool }
     dma_kick_info = |bus, phys|
         match bus {
             Ps1(_, rest) => {
@@ -363,23 +367,23 @@ Bus := [
                     scan6 = kick_check(rest, 6)
                     if scan6.go { scan6 } else { kick_scan(rest, 0) }
                 } else {
-                    { ch: 0, madr: 0, bcr: 0, go: Bool.False }
+                    { ch: 0, madr: 0, bcr: 0, chcr: 0, go: Bool.False }
                 }
             }
 
-            _ => { ch: 0, madr: 0, bcr: 0, go: Bool.False }
+            _ => { ch: 0, madr: 0, bcr: 0, chcr: 0, go: Bool.False }
         }
 
-    kick_scan : Ps1Rest, U32 -> { ch : U32, madr : U32, bcr : U32, go : Bool }
+    kick_scan : Ps1Rest, U32 -> { ch : U32, madr : U32, bcr : U32, chcr : U32, go : Bool }
     kick_scan = |rest, ch|
         if ch > 5 {
-            { ch: 0, madr: 0, bcr: 0, go: Bool.False }
+            { ch: 0, madr: 0, bcr: 0, chcr: 0, go: Bool.False }
         } else {
             k = kick_check(rest, ch)
             if k.go { k } else { kick_scan(rest, ch.plus(1)) }
         }
 
-    kick_check : Ps1Rest, U32 -> { ch : U32, madr : U32, bcr : U32, go : Bool }
+    kick_check : Ps1Rest, U32 -> { ch : U32, madr : U32, bcr : U32, chcr : U32, go : Bool }
     kick_check = |rest, ch| {
         v = dma_ch(rest, ch)
         enabled = dv32(rest, 36).shr_zf_wrap(ch.times_wrap(4).plus(3).to_u8_wrap()).bitwise_and(1) == 1
@@ -387,7 +391,7 @@ Bus := [
         sync = v.chcr.shr_zf_wrap(9).bitwise_and(3)
         manual = sync != 0 or v.chcr.bitwise_and(0x1000_0000) != 0
         mode_ok = ch != 6 or sync == 0
-        { ch: ch, madr: v.madr, bcr: v.bcr, go: enabled and started and manual and mode_ok }
+        { ch: ch, madr: v.madr, bcr: v.bcr, chcr: v.chcr, go: enabled and started and manual and mode_ok }
     }
 
     # transfer done: clear start/trigger, land MADR, zero the word count,
@@ -422,6 +426,23 @@ Bus := [
                 v = dma_ch(rest, ch)
                 r1 = dma_ch_set(rest, ch, { ..v, chcr: v.chcr.bitwise_and(0xEEFF_FFFF) })
                 Ps1(scratch, { ..r1, tty_unknown: r1.tty_unknown.append(0xDA.U64.shl_wrap(32).bitwise_or(ch.to_u64())) })
+            }
+
+            other => other
+        }
+
+    # an unimplemented GP0 command actually issued: loud (table 0xDB),
+    # DEDUPED — the fact matters, not the half-million text-glyph repeats
+    gpu_unknown : Bus, U32 -> Bus
+    gpu_unknown = |bus, cmd|
+        match bus {
+            Ps1(scratch, rest) => {
+                entry = 0xDB.U64.shl_wrap(32).bitwise_or(cmd.to_u64())
+                if rest.tty_unknown.contains(entry) {
+                    Ps1(scratch, rest)
+                } else {
+                    Ps1(scratch, { ..rest, tty_unknown: rest.tty_unknown.append(entry) })
+                }
             }
 
             other => other
@@ -704,9 +725,17 @@ Bus := [
     read_val = |bus, ram, size, addr, k, clock| {
         # scalar-only pre-pass, guarded so ordinary reads never pay the
         # union match (the guard reads no payload list — law-safe);
-        # covers the DMA (0x1080-0x10F7) and timer (0x1100-0x112F) files
-        tp = addr.bitwise_and(0x1FFF_FFFF).minus_wrap(0x1F80_1080)
-        tv = if tp < 0xB0 { dma_read(bus, addr).bitwise_or(timer_read(bus, addr, clock)) } else { 0 }
+        # covers the DMA (0x1080-0x10F7), timer (0x1100-0x112F), and GPU
+        # (0x1810/0x1814) register files
+        pp = addr.bitwise_and(0x1FFF_FFFF)
+        tp = pp.minus_wrap(0x1F80_1080)
+        tv = if tp < 0xB0 {
+            dma_read(bus, addr).bitwise_or(timer_read(bus, addr, clock))
+        } else if pp == 0x1F80_1810 or pp == 0x1F80_1814 {
+            gpu_read(bus, addr)
+        } else {
+            0
+        }
 
         match bus {
             Vector(v) => { val: v.reads.get(k) ?? 0, cost: 0 }
@@ -721,7 +750,8 @@ Bus := [
                 m_im = zero_mask(phys.bitwise_xor(0x1F80_1074))
                 m_rs = zero_mask(phys.bitwise_xor(0x1F80_1060))
                 m_cc = zero_mask(addr.bitwise_xor(0xFFFE_0130))
-                m_gs = zero_mask(phys.bitwise_xor(0x1F80_1814)) # GPUSTAT stub: always ready (bits 26/27/28), no GPU yet
+                m_gs = zero_mask(phys.bitwise_xor(0x1F80_1814)) # GPUSTAT: live, from the scalar pre-pass
+                m_gr = zero_mask(phys.bitwise_xor(0x1F80_1810)) # GPUREAD: staged stream/info word, same pre-pass
                 m_jd = zero_mask(phys.bitwise_xor(0x1F80_1040)) # JOY_DATA: digital-pad response byte
                 m_js = zero_mask(phys.bitwise_xor(0x1F80_1044)) # JOY_STAT: TX ready/finished
                 m_jc = zero_mask(phys.bitwise_xor(0x1F80_104A)) # JOY_CTRL echoes writes
@@ -758,7 +788,7 @@ Bus := [
                     .bitwise_or(rest.i_mask.bitwise_and(m_im))
                     .bitwise_or(rest.ram_size.bitwise_and(m_rs))
                     .bitwise_or(rest.cache_ctrl.bitwise_and(m_cc))
-                    .bitwise_or(0x1C00_0000.U32.bitwise_and(m_gs))
+                    .bitwise_or(tv.bitwise_and(m_gs.bitwise_or(m_gr)))
                     .bitwise_or(dv32(rest, 41).bitwise_and(m_jd))
                     .bitwise_or(0x7.U32.bitwise_and(m_js))
                     .bitwise_or(dv32(rest, 38).bitwise_and(m_jc))
@@ -863,6 +893,49 @@ Bus := [
         match bus {
             Ps1(scratch, rest) => Ps1(scratch, { ..rest, exc_ctx: ctx })
             other => other
+        }
+
+    # console-layer access to the dev slot table (GPU state etc.)
+    gpu_slot : Bus, U64 -> U64
+    gpu_slot = |bus, i|
+        match bus {
+            Ps1(_, rest) => dv(rest, i)
+            _ => 0
+        }
+
+    gpu_slot_set : Bus, U64, U64 -> Bus
+    gpu_slot_set = |bus, i, v|
+        match bus {
+            Ps1(scratch, rest) => Ps1(scratch, dset(rest, i, v))
+            other => other
+        }
+
+    # scalar-only GPU register read: GPUSTAT composed live from the
+    # slots, GPUREAD serving the staged stream/info word (slot 49)
+    gpu_read : Bus, U32 -> U32
+    gpu_read = |bus, addr|
+        match bus {
+            Ps1(_, rest) => {
+                phys = ps1_phys(addr)
+                if phys == 0x1F80_1814 {
+                    Gpu.gpustat({
+                        e1: dv32(rest, 44),
+                        mask: dv32(rest, 45),
+                        disp_off: dv32(rest, 46),
+                        dma_dir: dv32(rest, 47),
+                        mode: dv32(rest, 48),
+                        read_active: dv32(rest, 50),
+                        irq1: dv32(rest, 58),
+                        tex_allow: dv32(rest, 59),
+                    })
+                } else if phys == 0x1F80_1810 {
+                    dv32(rest, 49)
+                } else {
+                    0
+                }
+            }
+
+            _ => 0
         }
 
     # kernel-vector trap support (Cpu.step): is the TTY trap armed?

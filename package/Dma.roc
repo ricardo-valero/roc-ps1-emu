@@ -29,6 +29,18 @@ Dma :: [].{
         pages1.set(pi, page2) ?? pages1
     }
 
+    # word read from the RAM pages (DMA walks RAM a lot)
+    load_word : List(List(U8)), U32 -> U32
+    load_word = |pages, addr| {
+        i0 = addr.bitwise_and(0x1F_FFFC).to_u64()
+        page = pages.get(i0.shr_zf_wrap(12)) ?? []
+        o = i0.bitwise_and(0xFFF)
+        (page.get(o) ?? 0).to_u32()
+            .bitwise_or((page.get(o.plus(1)) ?? 0).to_u32().shl_wrap(8))
+            .bitwise_or((page.get(o.plus(2)) ?? 0).to_u32().shl_wrap(16))
+            .bitwise_or((page.get(o.plus(3)) ?? 0).to_u32().shl_wrap(24))
+    }
+
     otc_run : List(List(U8)), U32, U32 -> List(List(U8))
     otc_run = |pages0, madr, bcr| {
         var pages = pages0

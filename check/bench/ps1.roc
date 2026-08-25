@@ -19,6 +19,7 @@ import pf.Utc
 import ps1.Cpu
 import ps1.Bus
 import ps1.Psx
+import ps1.Gpu
 
 kernel : List(U8)
 kernel = [
@@ -42,13 +43,13 @@ main! = |args| {
     bus0 = Bus.ps1(List.repeat(0, 512), Bool.False)
     page0 = kernel.concat(List.repeat(0, 0x1000 - kernel.len()))
     ram0 = [page0].concat(List.repeat(List.repeat(0, 0x1000), 0x1FF))
-    warmup = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, 1000.plus(n % 2))
+    warmup = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, Gpu.vram_init({}), 1000.plus(n % 2))
     if warmup.cpu.pc.bitwise_and(0x1FFF_FFFF) >= 0x24 {
         Stdout.line!("BENCH KERNEL DIVERGED: pc=${warmup.cpu.pc.to_str()}")?
         Err(KernelDiverged)
     } else {
         t0 = Utc.now!()
-        result = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, n)
+        result = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, Gpu.vram_init({}), n)
         t1 = Utc.now!()
         elapsed_ns = (t1.minus_wrap(t0)).to_u64_wrap()
         if elapsed_ns == 0 {
