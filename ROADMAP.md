@@ -42,12 +42,20 @@ ticked as changes archive.
 
 ## Next
 
-- [ ] **DMA + timers + interrupts** — 7 DMA channels including OT
-  chain-following, root counters, IRQ delivery. Gated by ps1-tests
-  DMA/timer EXEs (including cpu/access-time, deferred from the bus
-  change: it measures with root counters and will calibrate the wait
-  table). Root counter 1 (hblank) accuracy lands here — CTR measures
-  real time with it.
+- [x] **DMA + timers + interrupts** — Psx.roc console layer born
+  (clock, VBlank source, single-slot timer scheduling, DMA kicks, IP2
+  mirror — all drivers are thin callers); root counters as lazy cycle
+  anchors (sysclock//8/hblank/dotclock, read-cleared reached flags as
+  ack intents, event-scheduled IRQs); 7-channel DMA register file with
+  OTC (ch6) live and device channels fail-loud; kernel trap grew the
+  psn00b surface (C0 vector, HookEntryInt dispatch trio, critical-
+  section syscalls, SR=0x401 sideload seed). Gated by ps1-tests
+  hardware logs: access-time GREEN (wait table calibrated — and the
+  i-cache reality re-recorded the bench floor at 0.30x honest cycles;
+  the GBA wait-state precedent does not transfer, decode cache is the
+  standing lever), otc-test GREEN, timers GREEN minus per-row
+  sync-mode exclusions (blanking widths = GPU timing); dpcr excluded
+  (SPU observable).
 - [ ] **GPU core** — command FIFO + software rasterizer into 1 MB VRAM.
   Gated by ps1-tests VRAM dumps diffed against hardware-captured
   references (the house frozen-digest workflow, upstream-supplied).

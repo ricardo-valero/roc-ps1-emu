@@ -1,6 +1,7 @@
-# Runner for Amidog's on-console CPU tests: sideload the PS-EXE, run
-# with a step budget (VBlank heartbeat + scripted pad in the loop),
-# capture kernel-vector TTY output, and gate on the test's own verdict.
+# Runner for Amidog's on-console CPU tests: sideload the PS-EXE, run it
+# through the Psx console layer with a step budget (VBlank and the IP2
+# mirror live in Psx.run, not here), capture kernel-vector TTY output,
+# and gate on the test's own verdict.
 # Any kernel call our trap does not implement is enumerated loudly and
 # fails the run.
 #
@@ -29,6 +30,7 @@ import pf.Stdout
 import ps1.Bus
 import ps1.Cpu
 import ps1.Exe
+import ps1.Psx
 
 # spec: exclusions print their reason at run time; this list only shrinks
 excluded : List({ name : Str, reason : Str })
@@ -43,37 +45,6 @@ parse_n : List(OsStr), U64, U64 -> U64
 parse_n = |args, idx, default| {
     raw = (args.get(idx) ?? OsStr.from_str("")).display().to_utf8().fold(0.U64, |acc, c| if c >= 48 and c <= 57 { acc.times_wrap(10).plus(c.minus(48).to_u64()) } else { acc })
     if raw == 0 { default } else { raw }
-}
-
-run : Cpu, Bus, List(List(U8)), U64 -> { cpu : Cpu, bus : Bus, ram : List(List(U8)), steps : U64 }
-run = |cpu0, bus0, ram0, budget| {
-    var cpu = cpu0
-    var bus = bus0
-    var ram = ram0
-    var k = 0.U64
-    # VBlank heartbeat: raise I_STAT bit 0 once per NTSC frame's worth of
-    # CPU cycles so frame-wait polls (and the tests' delay loops) advance
-    var next_vblank = 564_480.U64
-    var going = Bool.True
-    while going {
-        r = Cpu.step(cpu, bus, ram)
-        cpu = r.cpu
-        bus = r.bus
-        if r.st1_size != 0 {
-            ram = Cpu.store_ram(ram, r.st1_size, r.st1_addr, r.st1_val)
-            ram = Cpu.store_ram(ram, r.st2_size, r.st2_addr, r.st2_val)
-        } else {}
-        if cpu.cycles >= next_vblank {
-            bus = bus.raise_irq(0)
-            next_vblank = next_vblank.plus(564_480)
-        } else {}
-        cpu = Cpu.set_irq2(cpu, bus.irq2())
-        k = k.plus(1)
-        if k >= budget {
-            going = Bool.False
-        } else {}
-    }
-    { cpu: cpu, bus: bus, ram: ram, steps: k }
 }
 
 hex : U32 -> Str
@@ -136,7 +107,7 @@ main! = |args| {
     bytes = Path.from_os_str(path).read_bytes!()?
     bus0 = Bus.ps1(List.repeat(0, 0x80000), Bool.True)
     loaded = Exe.load(bus0, bytes)?
-    result = run(loaded.cpu, loaded.bus, loaded.ram, budget)
+    result = Psx.run(loaded.cpu, loaded.bus, loaded.ram, budget)
     tty = Str.from_utf8(result.bus.tty_bytes()) ?? "<non-utf8 tty>"
     Stdout.line!("--- tty (${result.bus.tty_bytes().len().to_str()} bytes) ---")?
     Stdout.line!(tty)?

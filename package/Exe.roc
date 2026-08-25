@@ -49,7 +49,9 @@ Exe :: [].{
             pages = pages.append(flat.sublist({ start: p.times_wrap(0x1000), len: 0x1000 }))
             p = p.plus(1)
         }
-        c0 = Cpu.init(e.pc)
+        # a real BIOS hands off with interrupts live (IEc + IM2); the
+        # test corpus assumes it — I_MASK gates actual delivery
+        c0 = { ..Cpu.init(e.pc), sr: 0x0000_0401 }
         c1 = Cpu.set_r(c0, 28, e.gp)
         c2 = Cpu.set_r(c1, 29, e.sp)
         c3 = Cpu.set_r(c2, 30, e.sp)
@@ -71,7 +73,7 @@ expect {
     bus = Bus.ps1(List.repeat(0, 512), Bool.False)
     match Exe.load(bus, file) {
         Ok(r) => {
-            word = r.bus.read_val(r.ram, 4, 0x8001_0000, 0)
+            word = r.bus.read_val(r.ram, 4, 0x8001_0000, 0, 0)
             r.cpu.pc == 0x8001_0000
             and Cpu.get(r.cpu, 28) == 0x8009_0000
             and Cpu.get(r.cpu, 29) == 0x801F_F000
