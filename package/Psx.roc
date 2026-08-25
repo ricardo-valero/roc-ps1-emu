@@ -2,6 +2,7 @@ import /Bus
 import /Cpu
 import /Dma
 import /Gpu
+import /Raster
 
 # The console layer: owns emulated time. One run loop for every driver —
 # CPU step, store-intent application, the VBlank frame clock, and the
@@ -264,7 +265,13 @@ Psx :: [].{
                     gp0_need = gp0_need.minus(1)
                     if gp0_need == 0 {
                         cmd = (gp0_buf.get(0) ?? 0).shr_zf_wrap(24)
-                        if cmd == 0x02 or cmd == 0x80 {
+                        if cmd >= 0x20 and cmd < 0x40 and cmd.bitwise_and(4) == 0 {
+                            rst = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
+                            vram = Raster.draw_poly(vram, gp0_buf, rst)
+                        } else if cmd >= 0x60 and cmd < 0x80 and cmd.bitwise_and(4) == 0 {
+                            rst = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
+                            vram = Raster.draw_rect(vram, gp0_buf, rst)
+                        } else if cmd == 0x02 or cmd == 0x80 {
                             vram = Gpu.exec_vram(vram, gp0_buf, Bus.gpu_slot(bus, 45).to_u32_wrap())
                         } else if cmd == 0xA0 {
                             d = Gpu.xfer_decode(gp0_buf.get(1) ?? 0, gp0_buf.get(2) ?? 0)

@@ -33,7 +33,13 @@
 #     LWL/LWR pair, and hardware charges an inter-access penalty that
 #     per-access wait constants cannot express (38.94 measured vs 34
 #     modeled) — a recorded bus-model finding, not a hidden exclusion.
-#  8. ONE out-of-tolerance numeric token per line is allowed: the
+#  8. VRAM-gated tests: after the run, the emulator's VRAM is compared
+#     BIT-EXACT (masked to 0x7FFF — the upstream PNGs carry no reliable
+#     bit-15/mask encoding; the RGBA captures' alpha polarity is
+#     unresolved) against the converted reference blob
+#     (convert-vram.py, pinned). Mismatches report coordinates; no
+#     tolerance. A test is VRAM-gated when data/<name>.vram exists.
+#  9. ONE out-of-tolerance numeric token per line is allowed: the
 #     hardware measurement rows carry a single warmup/phase outlier
 #     (e.g. a first frame-delay sample caught mid-frame, one IRQ-torn
 #     delay sample); deterministic emulation has none, so a second
@@ -237,8 +243,12 @@ main! = |args| {
     exe_path = "check/ps1-tests/data/${name}.exe"
     log_path = "check/ps1-tests/data/${name}.psx.log"
     bytes = Path.from_os_str(OsStr.from_str(exe_path)).read_bytes!()?
-    ref_bytes = Path.from_os_str(OsStr.from_str(log_path)).read_bytes!()?
-    ref_text = Str.from_utf8(ref_bytes) ?? ""
+    # VRAM-gated tests have no psx.log — the reference is the blob
+    ref_text =
+        match Path.from_os_str(OsStr.from_str(log_path)).read_bytes!() {
+            Ok(rb) => Str.from_utf8(rb) ?? ""
+            Err(_) => ""
+        }
     bus0 = Bus.ps1(List.repeat(0, 0x80000), Bool.True)
     loaded = Exe.load(bus0, bytes)?
     out = Psx.run(loaded.cpu, loaded.bus, loaded.ram, Gpu.vram_init({}), budget)
@@ -285,8 +295,36 @@ main! = |args| {
         wi = wi.plus(1)
     }
 
-    Stdout.line!("--- ${name}: ${got.len().to_str()} tty lines vs ${want.len().to_str()} hardware lines; ${missed.len().to_str()} unmatched, ${fails.to_str()} fails, ${fatal_unknowns.to_str()} fatal ledger entries ---")?
-    if missed.is_empty() and fails == 0 and fatal_unknowns == 0 {
+    # rule 8: VRAM reference diff when a converted blob exists
+    vram_diff =
+        match Path.from_os_str(OsStr.from_str("check/ps1-tests/data/${name}.vram")).read_bytes!() {
+            Err(_) => { count: 0.U64, first: [] }
+            Ok(ref_blob) => {
+                var count = 0.U64
+                var first = []
+                var i = 0.U64
+                while i < 0x8_0000 {
+                    ours = (out.vram.get(i) ?? 0).bitwise_and(0x7FFF)
+                    want_px = (ref_blob.get(i.times_wrap(2)) ?? 0).to_u16().bitwise_or((ref_blob.get(i.times_wrap(2).plus(1)) ?? 0).to_u16().shl_wrap(8))
+                    if ours != want_px {
+                        count = count.plus(1)
+                        if first.len() < 10 {
+                            first = first.append({ x: i.bitwise_and(1023), y: i.shr_zf_wrap(10), got: ours, want: want_px })
+                        } else {}
+                    } else {}
+                    i = i.plus(1)
+                }
+                { count: count, first: first }
+            }
+        }
+    var vi = 0.U64
+    while vi < vram_diff.first.len() {
+        m = vram_diff.first.get(vi) ?? { x: 0, y: 0, got: 0, want: 0 }
+        Stdout.line!("VRAM MISMATCH (${m.x.to_str()},${m.y.to_str()}): got ${m.got.to_str()} want ${m.want.to_str()}")?
+        vi = vi.plus(1)
+    }
+    Stdout.line!("--- ${name}: ${got.len().to_str()} tty lines vs ${want.len().to_str()} hardware lines; ${missed.len().to_str()} unmatched, ${fails.to_str()} fails, ${fatal_unknowns.to_str()} fatal ledger entries, ${vram_diff.count.to_str()} vram mismatches ---")?
+    if missed.is_empty() and fails == 0 and fatal_unknowns == 0 and vram_diff.count == 0 {
         Stdout.line!("${name}: ok — matches the hardware log")
     } else {
         var mi = 0.U64
