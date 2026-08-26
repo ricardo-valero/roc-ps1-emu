@@ -10,6 +10,10 @@
 #   cp /tmp/ps1tests/cpu/access-time/access-time.exe check/ps1-tests/data/
 #   cp /tmp/ps1tests/timers/timers.exe check/ps1-tests/data/
 #   cp /tmp/ps1tests/dma/otc-test/otc-test.exe check/ps1-tests/data/
+#   (and the gpu/* EXEs the same way)
+#
+#   VRAM references convert once from the upstream vram.png captures:
+#   python3 check/ps1-tests/convert-vram.py <src>/vram.png data/<name>.vram
 #
 #   roc build check/ps1-tests/fetch.roc --output=/tmp/pt_fetch && /tmp/pt_fetch
 app [main!] {
@@ -43,6 +47,28 @@ files = [
     { name: "chain-looping.psx.log", sha256: "f18938ed2f850a344206bd46dc926e7abbdd9170889b9c601c57ad8bcdbf1d58" },
     { name: "chopping.psx.log", sha256: "5cdb8283781705ac67308f076c653a37656e3c7494c2fc8d7fcf46c22c17a8aa" },
     { name: "bandwidth.psx.log", sha256: "b1dbea70c57848acad21498c7133b8ef6089005987a67fc9f4231c9fb1ba76c0" },
+    { name: "triangle.exe", sha256: "f035e4893cdb9258d700f37ab88ae9aba03fcbbf4029a15862ccf8ca2f6d9a3f" },
+    { name: "quad.exe", sha256: "2a5d3bc0cdf881e12302b2580a4032c8d3e1e6f8dbf5e46d5563c09154ba24b7" },
+    { name: "lines.exe", sha256: "0e68352be9252cb6fe733e2f24db3cb70a82df14c175c1fe24334a2dfff239d1" },
+    { name: "rectangles.exe", sha256: "6eaac3628dee8a62a268aa0c10b2b72fa1b9217525e23dd2673cc36961db37b6" },
+    { name: "clipping.exe", sha256: "45817b0abfe7d1741c5c68fd47309eed9fff814e6a4615c3946a0eb11fbd3b2a" },
+    { name: "clut-cache.exe", sha256: "528d1b318da23ea37cc5cb1ea78d9fe683367649887b01f6b4bcfd59c4818dc6" },
+    { name: "texture-flip.exe", sha256: "9b8b06e2c286e86b4e90235c43037b516a693c108882c1522ca6f9cfed4e0563" },
+    { name: "texture-overflow.exe", sha256: "31f3a173ad66fb2ac23900224ab09264bae42a3d278617f3482237286a25211f" },
+    { name: "transparency.exe", sha256: "82a71923f5d9bfaded9aef65f307d8023d4578df70639dd5fc254b7e885dc1e8" },
+    { name: "uv-interpolation.exe", sha256: "8b93fc4fbc411fc536f1dcead9cf136afcf5bceaf4c3c086dcae8b7c172039b5" },
+    { name: "vram-to-vram-overlap.exe", sha256: "5f3d560f503f69bb712dad3e8842b5fc40509c9cb697fa6b59c7779a3f43cab5" },
+    { name: "triangle.vram", sha256: "b9916d5e011991e3dbdd88680cc7abd4e017a4328f6e5cbb8402e0e7d3c34747" },
+    { name: "quad.vram", sha256: "b9dddc2743e81cfc29e862f12ce77c7393af6ef54314cc373f5ca7c05cf8f73b" },
+    { name: "lines.vram", sha256: "7c7d1c983c34dab4c6f71ffdfa76958ec3f34fc8293fae1a86f6cc5e6ab5f9cd" },
+    { name: "rectangles.vram", sha256: "2317d02c5844cd8522093a94f92868f259851efe0168110818d2b579914edcd0" },
+    { name: "clipping.vram", sha256: "b3c356b29c2feae42dae440df74774f943e3326f4e82626bd5ea6b506ca0c0ae" },
+    { name: "clut-cache.vram", sha256: "734ea5210f20b6cfb1bc071f2a359dfe6241f115224595a97284c5f5bd88ddf7" },
+    { name: "texture-flip.vram", sha256: "cb0ea3f99522714a26e4b2dec46543bc04eb82b99a7f594fb491576d3e36ef9f" },
+    { name: "texture-overflow.vram", sha256: "2cc8b3fb0c59661c5a6e3092af108557c4618f7e47cc45cd185aaf3bc774a20c" },
+    { name: "transparency.vram", sha256: "21b80ddf7c61ef0435e18167411a0e2900c215b81023241592ce0b08289a19ac" },
+    { name: "uv-interpolation.vram", sha256: "44d1d1a4888edb6897afe9aeef657685a92b3c2de21599d4252b6f56ae8445fc" },
+    { name: "vram-to-vram-overlap.vram", sha256: "93010b5ae50dd9ec22deb9f52623a1651afbed4a68035a77ebabb91aefab3369" },
 ]
 
 verify! : { name : Str, sha256 : Str } => Try({}, _)

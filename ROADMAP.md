@@ -56,10 +56,18 @@ ticked as changes archive.
   standing lever), otc-test GREEN, timers GREEN minus per-row
   sync-mode exclusions (blanking widths = GPU timing); dpcr excluded
   (SPU observable).
-- [ ] **GPU core** — command FIFO + software rasterizer into 1 MB VRAM.
-  Gated by ps1-tests VRAM dumps diffed against hardware-captured
-  references (the house frozen-digest workflow, upstream-supplied).
-  Known dragons: mask bits, texture cache, drawing offset/clip.
+- [x] **GPU core** — VRAM as a driver-owned flat list beside the RAM
+  pages; GP0/GP1 command processing with live GPUSTAT; transfers with
+  mask-bit semantics; DMA channel 2 (block + linked-list, looping
+  chains hang like hardware); and a software rasterizer ported
+  faithfully from Mednafen's algorithm — TEN VRAM references BIT-EXACT
+  (triangle, quad, clipping, rectangles, texture-flip,
+  texture-overflow, uv-interpolation, clut-cache with the real CLUT
+  cache quirks, transparency, vram-to-vram-overlap with the 128-pixel
+  chunk FIFO). The dragons all showed up and were slain by the
+  references: mask bits, CLUT cache staleness, drawing offset/clip,
+  overlap copies. Line rasterizer implemented (its test EXE needs the
+  GTE). The two-loop console shape kept the bench at 0.33x.
 - [ ] **GTE** — fixed-point vector coprocessor. Gated by Amidog
   psxtest_gte + ps1-tests gte-fuzz. Pure math; no JSON tests exist yet.
 - [ ] **BIOS boot** — OpenBIOS LLE to logo and shell; trace-diff

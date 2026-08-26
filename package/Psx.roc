@@ -45,6 +45,9 @@ Psx :: [].{
         var gp0_in = [] # words queued for the GP0 machine this step (CPU store or DMA)
         var gp0_buf = List.with_capacity(16)
         var gp0_need = 0.U64
+        var gp0_poly = Bool.False # assembling a polyline until its terminator
+        var clut_cache = [] # palette cache: reloads only when tag changes (hardware)
+        var clut_tag = 0x7FFF.U64 # no clut held, zero entries
         var st_up = Bool.False # A0h CPU->VRAM stream active
         var st_t = { x: 0.U64, y: 0.U64, w: 0.U64 }
         var st_li = 0.U64
@@ -209,11 +212,13 @@ Psx :: [].{
                     bus = Bus.gpu_slot_set(Bus.gpu_slot_set(Bus.gpu_slot_set(Bus.gpu_slot_set(bus, 58, 0), 50, 0), 49, 0), 59, 0)
                     gp0_buf = List.with_capacity(16)
                     gp0_need = 0
+                    gp0_poly = Bool.False
                     st_up = Bool.False
                     rd_on = Bool.False
                 } else if g1 == 0x01 {
                     gp0_buf = List.with_capacity(16)
                     gp0_need = 0
+                    gp0_poly = Bool.False
                     st_up = Bool.False
                 } else if g1 == 0x02 {
                     bus = Bus.gpu_slot_set(bus, 58, 0)
@@ -260,6 +265,20 @@ Psx :: [].{
                     if st_li >= st_total {
                         st_up = Bool.False
                     } else {}
+                } else if gp0_poly {
+                    # polyline: terminator checked at vertex-boundary
+                    # words ((w & 0xF000F000) == 0x50005000)
+                    pcmd = (gp0_buf.get(0) ?? 0).shr_zf_wrap(24)
+                    pg = pcmd.bitwise_and(0x10) != 0
+                    at_boundary = if pg { gp0_buf.len().bitwise_and(1) == 0 } else { Bool.True }
+                    if at_boundary and w.bitwise_and(0xF000_F000) == 0x5000_5000 {
+                        rstl = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
+                        vram = Raster.draw_lines(vram, gp0_buf, rstl)
+                        gp0_buf = List.with_capacity(16)
+                        gp0_poly = Bool.False
+                    } else {
+                        gp0_buf = gp0_buf.append(w)
+                    }
                 } else if gp0_need > 0 {
                     gp0_buf = gp0_buf.append(w)
                     gp0_need = gp0_need.minus(1)
@@ -268,6 +287,9 @@ Psx :: [].{
                         if cmd >= 0x20 and cmd < 0x40 and cmd.bitwise_and(4) == 0 {
                             rst = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
                             vram = Raster.draw_poly(vram, gp0_buf, rst)
+                        } else if cmd >= 0x40 and cmd < 0x60 {
+                            rstl = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
+                            vram = Raster.draw_lines(vram, gp0_buf, rstl)
                         } else if cmd >= 0x60 and cmd < 0x80 and cmd.bitwise_and(4) == 0 {
                             rst = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
                             vram = Raster.draw_rect(vram, gp0_buf, rst)
@@ -286,14 +308,46 @@ Psx :: [].{
                             rd_total = d.w.times_wrap(d.h)
                             rd_on = rd_total > 0
                             bus = Bus.gpu_slot_set(Bus.gpu_slot_set(bus, 50, if rd_on { 1 } else { 0 }), 49, Gpu.read_word(vram, rd_t, 0, rd_total).to_u64())
-                        } else {
-                            if cmd >= 0x20 and cmd < 0x40 and cmd.bitwise_and(4) != 0 {
-                                idx = if cmd.bitwise_and(0x10) != 0 { 5.U64 } else { 4 }
-                                page = (gp0_buf.get(idx) ?? 0).shr_zf_wrap(16)
-                                pm = 0x1FF.U64.bitwise_or(if Bus.gpu_slot(bus, 59) != 0 { 0x800.U64 } else { 0 })
-                                e1old = Bus.gpu_slot(bus, 44)
-                                bus = Bus.gpu_slot_set(bus, 44, e1old.bitwise_and(pm.bitwise_not()).bitwise_or(page.to_u64().bitwise_and(pm)))
+                        } else if cmd >= 0x20 and cmd < 0x40 and cmd.bitwise_and(4) != 0 {
+                            # textured polygon: draw, then latch its
+                            # texpage word into E1 (hardware does)
+                            rstt = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
+                            pcl = (gp0_buf.get(2) ?? 0).shr_zf_wrap(16)
+                            ppg = (gp0_buf.get(if cmd.bitwise_and(0x10) != 0 { 5.U64 } else { 4 }) ?? 0).shr_zf_wrap(16)
+                            ptm0 = ppg.shr_zf_wrap(7).bitwise_and(3)
+                            ptm = if ptm0 > 2 { 2.U64.to_u32_wrap() } else { ptm0 }
+                            if ptm < 2 {
+                                # reload only when the clut word moved or MORE
+                                # entries are needed: 8bit->4bit reuses the
+                                # cached 256 (stale on purpose — hardware)
+                                pneed = if ptm == 0 { 16.U64 } else { 256 }
+                                pheld = clut_tag.shr_zf_wrap(16)
+                                if pcl.bitwise_and(0x7FFF).to_u64() != clut_tag.bitwise_and(0x7FFF) or pneed > pheld {
+                                    clut_cache = Raster.clut_load(vram, pcl, pneed)
+                                    clut_tag = pcl.bitwise_and(0x7FFF).to_u64().bitwise_or(pneed.shl_wrap(16))
+                                } else {}
                             } else {}
+                            vram = Raster.draw_poly_tex(vram, gp0_buf, Bus.gpu_slot(bus, 51), clut_cache, rstt)
+                            idx = if cmd.bitwise_and(0x10) != 0 { 5.U64 } else { 4 }
+                            page = (gp0_buf.get(idx) ?? 0).shr_zf_wrap(16)
+                            pm = 0x1FF.U64.bitwise_or(if Bus.gpu_slot(bus, 59) != 0 { 0x800.U64 } else { 0 })
+                            e1old = Bus.gpu_slot(bus, 44)
+                            bus = Bus.gpu_slot_set(bus, 44, e1old.bitwise_and(pm.bitwise_not()).bitwise_or(page.to_u64().bitwise_and(pm)))
+                        } else if cmd >= 0x60 and cmd < 0x80 and cmd.bitwise_and(4) != 0 {
+                            rstt = Raster.state_from(Bus.gpu_slot(bus, 44), Bus.gpu_slot(bus, 52), Bus.gpu_slot(bus, 53), Bus.gpu_slot(bus, 54), Bus.gpu_slot(bus, 45))
+                            scl = (gp0_buf.get(2) ?? 0).shr_zf_wrap(16)
+                            stm0 = Bus.gpu_slot(bus, 44).shr_zf_wrap(7).bitwise_and(3).to_u32_wrap()
+                            stm = if stm0 > 2 { 2.U32 } else { stm0 }
+                            if stm < 2 {
+                                sneed = if stm == 0 { 16.U64 } else { 256 }
+                                sheld = clut_tag.shr_zf_wrap(16)
+                                if scl.bitwise_and(0x7FFF).to_u64() != clut_tag.bitwise_and(0x7FFF) or sneed > sheld {
+                                    clut_cache = Raster.clut_load(vram, scl, sneed)
+                                    clut_tag = scl.bitwise_and(0x7FFF).to_u64().bitwise_or(sneed.shl_wrap(16))
+                                } else {}
+                            } else {}
+                            vram = Raster.draw_sprite(vram, gp0_buf, Bus.gpu_slot(bus, 51), clut_cache, rstt)
+                        } else {
                             bus = Bus.gpu_unknown(bus, cmd)
                         }
                         gp0_buf = List.with_capacity(16)
@@ -301,7 +355,11 @@ Psx :: [].{
                 } else {
                     cmd = w.shr_zf_wrap(24)
                     need = Gpu.cmd_len(cmd)
-                    if need > 1 {
+                    if cmd >= 0x40 and cmd < 0x60 and cmd.bitwise_and(8) != 0 {
+                        # polyline start: open-ended until the terminator
+                        gp0_buf = List.with_capacity(16).append(w)
+                        gp0_poly = Bool.True
+                    } else if need > 1 {
                         gp0_buf = List.with_capacity(16).append(w)
                         gp0_need = need.minus(1)
                     } else if cmd == 0xE1 {
@@ -315,7 +373,9 @@ Psx :: [].{
                         bus = Bus.gpu_slot_set(bus, slot, w.bitwise_and(0x00FF_FFFF).to_u64())
                     } else if cmd == 0x1F {
                         bus = Bus.gpu_slot_set(bus, 58, 1)
-                    } else if cmd == 0x00 or cmd == 0x01 or cmd == 0x03 {
+                    } else if cmd == 0x01 {
+                        clut_tag = 0x7FFF # Clear Cache invalidates the CLUT cache
+                    } else if cmd == 0x00 or cmd == 0x03 {
                         {}
                     } else {
                         bus = Bus.gpu_unknown(bus, cmd)

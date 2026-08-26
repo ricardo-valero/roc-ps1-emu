@@ -39,7 +39,13 @@
 #     unresolved) against the converted reference blob
 #     (convert-vram.py, pinned). Mismatches report coordinates; no
 #     tolerance. A test is VRAM-gated when data/<name>.vram exists.
-#  9. ONE out-of-tolerance numeric token per line is allowed: the
+#  9. Judged region: transparency's reference contains CAPTURE-RIG
+#     RESIDUE outside the 320x240 drawing area (its mismatch count was
+#     EXACTLY 524288-76800 with the inside perfect — the test never
+#     touches the outside, the rig's previous contents leak into the
+#     capture). Its diff is restricted to the region the test writes;
+#     every other test is judged full-frame.
+# 10. ONE out-of-tolerance numeric token per line is allowed: the
 #     hardware measurement rows carry a single warmup/phase outlier
 #     (e.g. a first frame-delay sample caught mid-frame, one IRQ-torn
 #     delay sample); deterministic emulation has none, so a second
@@ -66,6 +72,7 @@ excluded_note = [
     { name: "chopping", reason: "measures CPU cycles DURING chopped transfers — the atomic-transfer console model cannot express DMA/CPU interleave timing (12 sync-1 sweep rows); a recorded model finding, re-visit if transfer timing ever lands" },
     { name: "bandwidth", reason: "draw-speed rows need the rasterizer plus per-primitive GPU timing; re-evaluate after the rasterizer group" },
     { name: "gpustat", reason: "no released EXE in build-158 (source-only upstream test); its documented GPUSTAT semantics are covered by expects — re-admit if a newer release ships a binary" },
+    { name: "lines", reason: "the EXE computes its star pattern with the GTE (COP2 — cause 0x2C on first use); the LINE RASTERIZER itself is implemented and wired, re-admit with the gte change" },
 ]
 
 parse_n : List(OsStr), U64, U64 -> U64
@@ -295,6 +302,8 @@ main! = |args| {
         wi = wi.plus(1)
     }
 
+    # rule 9: judged region (full frame unless recorded otherwise)
+    jr = if name == "transparency" { { x: 0.U64, y: 0.U64, w: 320.U64, h: 240.U64 } } else { { x: 0.U64, y: 0.U64, w: 1024.U64, h: 512.U64 } }
     # rule 8: VRAM reference diff when a converted blob exists
     vram_diff =
         match Path.from_os_str(OsStr.from_str("check/ps1-tests/data/${name}.vram")).read_bytes!() {
@@ -304,8 +313,11 @@ main! = |args| {
                 var first = []
                 var i = 0.U64
                 while i < 0x8_0000 {
-                    ours = (out.vram.get(i) ?? 0).bitwise_and(0x7FFF)
-                    want_px = (ref_blob.get(i.times_wrap(2)) ?? 0).to_u16().bitwise_or((ref_blob.get(i.times_wrap(2).plus(1)) ?? 0).to_u16().shl_wrap(8))
+                    px_x = i.bitwise_and(1023)
+                    px_y = i.shr_zf_wrap(10)
+                    in_region = px_x >= jr.x and px_x < jr.x.plus(jr.w) and px_y >= jr.y and px_y < jr.y.plus(jr.h)
+                    ours = if in_region { (out.vram.get(i) ?? 0).bitwise_and(0x7FFF) } else { 0 }
+                    want_px = if in_region { (ref_blob.get(i.times_wrap(2)) ?? 0).to_u16().bitwise_or((ref_blob.get(i.times_wrap(2).plus(1)) ?? 0).to_u16().shl_wrap(8)) } else { 0 }
                     if ours != want_px {
                         count = count.plus(1)
                         if first.len() < 10 {

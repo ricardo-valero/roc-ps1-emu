@@ -146,17 +146,30 @@ Gpu :: [].{
         }
     }
 
-    # 80h VRAM->VRAM copy with wrapping and mask semantics
+    # 80h VRAM->VRAM copy with wrapping and mask semantics. Copies in
+    # 128-pixel chunks — source pixels of a chunk are all read BEFORE
+    # any are written (the hardware FIFO behavior overlapping copies
+    # observe; per-pixel interleave diverges on the overlap test)
     copy_rect : List(U16), U64, U64, U64, U64, U64, U64, U32 -> List(U16)
     copy_rect = |vram0, sx, sy, dx, dy, w, h, mask| {
         var vram = vram0
         var row = 0.U64
         while row < h {
-            var col = 0.U64
-            while col < w {
-                px = vram_get(vram, sx.plus(col), sy.plus(row))
-                vram = put_masked(vram, dx.plus(col), dy.plus(row), px, mask)
-                col = col.plus(1)
+            var cx = 0.U64
+            while cx < w {
+                chunk = if w.minus(cx) > 128 { 128.U64 } else { w.minus(cx) }
+                var buf = List.with_capacity(128)
+                var i = 0.U64
+                while i < chunk {
+                    buf = buf.append(vram_get(vram, sx.plus(cx).plus(i), sy.plus(row)))
+                    i = i.plus(1)
+                }
+                var j = 0.U64
+                while j < chunk {
+                    vram = put_masked(vram, dx.plus(cx).plus(j), dy.plus(row), buf.get(j) ?? 0, mask)
+                    j = j.plus(1)
+                }
+                cx = cx.plus(chunk)
             }
             row = row.plus(1)
         }
