@@ -1,0 +1,2 @@
+# direnv/nix-direnv cache: symlinks into the nix store, machine-local
+.direnv/
