@@ -24,6 +24,15 @@
 # perf obligation is the real-bus bench's >= 1.00x, measured
 # 1.79x-1.96x the same day). The decode cache remains the known lever
 # beyond that.
+# ps1-gte ledger (2026-08-26): the step grew a COP2 arm (CU gating,
+# MFC2/CFC2/MTC2/CTC2, the imm25 command form, LWC2/SWC2) plus three
+# GTE-intent fields on the Out record. Measured cost is small and both
+# floors hold: core-only 0.33x (was 0.32x on the same machine before the
+# change - inside noise), real-bus 0.32x (the gpu-core change recorded
+# 0.33-0.34x, so roughly 3% for the new arm). The register file is
+# DRIVER-OWNED and read val-only inside the step, so nothing GTE-shaped
+# is threaded through the step's payload; that is why the cost is a
+# branch and not a memmove. Floors unchanged at 0.30x.
 app [main!] {
     pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.21.0/4rAQg8kUYZ3Vksr4qMQHpaFYNiHSn9GgS7gVxghd1XYV.tar.zst",
     ps1: "../../package/main.roc",
@@ -33,6 +42,7 @@ import pf.OsStr
 import pf.Stdout
 import pf.Utc
 import ps1.Cpu
+import ps1.Gte
 import ps1.Bus
 
 # loop at 0x00: ADDIU r1+=1; ADDU r2+=r1; AND r3=r2&r4; LW r5<-0x100;
@@ -61,9 +71,10 @@ run = |cpu0, bus0, ram0, n| {
     var cpu = cpu0
     var bus = bus0
     var ram = ram0
+    gte = Gte.init({})
     var k = 0.U64
     while k < n {
-        r = Cpu.step(cpu, bus, ram)
+        r = Cpu.step(cpu, bus, ram, gte)
         cpu = r.cpu
         bus = r.bus
         if r.st1_size != 0 {

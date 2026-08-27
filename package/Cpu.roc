@@ -1,6 +1,7 @@
 import /Bus
 import /Mips
 import /Bit
+import /Gte
 
 # MIPS R3000A processor core: state in, state out, no effects. One
 # architectural instruction per step against a pluggable Bus.
@@ -216,8 +217,13 @@ Cpu := {
     # the unavoidable clone at ~8 KB (page + spine) instead of 2 MB; the
     # PS1's aligned accesses never cross a page. See Bus.roc's shape note
     # and the perf repro.
-    step : Cpu, Bus, List(List(U8)) -> { cpu : Cpu, bus : Bus, st1_size : U8, st1_addr : U32, st1_val : U32, st2_size : U8, st2_addr : U32, st2_val : U32, rd1_size : U8, rd1_addr : U32, rd1_val : U32, rd2_size : U8, rd2_addr : U32, rd2_val : U32, ack_addr : U32 }
-    step = |cpu, bus0, ram0|
+    # gte0 is READ-ONLY here (val-only, like the RAM pages): COP2 writes
+    # and commands leave as INTENTS in gte_kind/gte_idx/gte_val for the
+    # console layer to apply, so no register-file list is threaded
+    # through the step's payload. gte_kind: 0 none, 1 register write, 2
+    # command word.
+    step : Cpu, Bus, List(List(U8)), List(U32) -> { cpu : Cpu, bus : Bus, st1_size : U8, st1_addr : U32, st1_val : U32, st2_size : U8, st2_addr : U32, st2_val : U32, rd1_size : U8, rd1_addr : U32, rd1_val : U32, rd2_size : U8, rd2_addr : U32, rd2_val : U32, ack_addr : U32, gte_kind : U8, gte_idx : U32, gte_val : U32 }
+    step = |cpu, bus0, ram0, gte0|
         if cpu.sr.bitwise_and(1) == 1 and cpu.sr.bitwise_and(cpu.cause).bitwise_and(0xFF00) != 0 {
             # hardware interrupt, taken between instructions (excode 0);
             # branch-delay EPC/BD semantics come from take_exception
@@ -256,9 +262,9 @@ Cpu := {
                     r23: bw(10),
                     pc: bw(0),
                 }
-                { cpu: entered, bus: Bus.set_exc_ctx(t.bus, ctx), st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0 }
+                { cpu: entered, bus: Bus.set_exc_ctx(t.bus, ctx), st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0 }
             } else {
-                { cpu: t.cpu, bus: t.bus, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0 }
+                { cpu: t.cpu, bus: t.bus, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0 }
             }
         } else if kernel_trap_hit(cpu, bus0) {
             # A0/B0 kernel-vector TTY trap (sideload harness): capture the
@@ -283,7 +289,7 @@ Cpu := {
                     load: NoLoad,
                     cycles: cpu.cycles.plus(1),
                 }
-                return { cpu: back, bus: bus0, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0 }
+                return { cpu: back, bus: bus0, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0 }
             } else {}
             k = Bus.kernel_call(bus0, ram0, ppc, get(cpu, 9), { a0: get(cpu, 4), a1: get(cpu, 5), a2: get(cpu, 6), a3: get(cpu, 7), sp: get(cpu, 29) })
             landed = land_all(cpu)
@@ -295,11 +301,11 @@ Cpu := {
                     cycles: cpu.cycles.plus(1),
                 },
                 bus: k.bus,
-                st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0,
+                st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0,
             }
         } else if cpu.pc.bitwise_and(3) != 0 {
             t = take_exception(land_all(cpu), bus0, 0, exc_adel, Badv(cpu.pc))
-            { cpu: t.cpu, bus: t.bus, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0 }
+            { cpu: t.cpu, bus: t.bus, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0 }
         } else {
             f = bus0.fetch_val(ram0, cpu.pc, cpu.cycles)
             op = f.val
@@ -327,6 +333,9 @@ Cpu := {
             var rd2_size = 0.U8
             var rd2_addr = 0.U32
             var rd2_val = 0.U32
+            var gte_kind = 0.U8
+            var gte_idx = 0.U32
+            var gte_val = 0.U32
             var has_exc = Bool.False
             var exc_code = 0.U32
             var exc_badv = 0.U32
@@ -649,7 +658,12 @@ Cpu := {
                     {}
                 }
 
-                16 => # COP0
+                16 => # COP0 — usable in kernel mode regardless of CU0
+                    if cpu.sr.bitwise_and(0x1000_0000) == 0 and cpu.sr.bitwise_and(0x2) != 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
                     match rs_i {
                         0 => { # MFC0 (load-delayed)
                             load_i = rt_i
@@ -682,18 +696,88 @@ Cpu := {
                                 {}
                             }
 
-                        _ => {
-                            has_exc = Bool.True
-                            exc_code = exc_ri
-                            {}
-                        }
+                        _ => {} # an unrecognised COP0 rs is a SILENT
+                        # NO-OP, not a reserved instruction: ps1-tests
+                        # cpu/cop's testCop0InvalidOpcode runs
+                        # `(16 << 26) | (0x1f << 21)` and asserts no
+                        # exception was thrown. (MFC0/MTC0 on a
+                        # nonexistent COP0 REGISTER is a different case
+                        # that does raise RI — that belongs with the
+                        # COP0 debug-register work psxtest_cpx needs.)
+                    }
                     }
 
-                18 => { # COP2: GTE arrives in its own change
-                    has_exc = Bool.True
-                    exc_code = exc_cpu
-                    {}
-                }
+                # COP1/COP3 do not exist on the PlayStation, but the CU
+                # bits still gate them: with SR.CUn SET they are silent
+                # no-ops, and ONLY with it clear do they raise
+                # coprocessor-unusable. (psxtest_cpx judges exactly this:
+                # it runs each opcode with SR = F0000000h and wants no
+                # exception at all.) The same rule covers LWC/SWC 0/1/3
+                # below.
+                17 =>
+                    if cpu.sr.bitwise_and(0x2000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        {}
+                    }
+
+                19 =>
+                    if cpu.sr.bitwise_and(0x8000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        {}
+                    }
+
+                18 => # COP2 (GTE)
+                    if cpu.sr.bitwise_and(0x4000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else if rs_i >= 16 {
+                        # bit 25 set: the imm25 command form
+                        gte_kind = 2
+                        gte_val = op.bitwise_and(0x01FF_FFFF)
+                        mem_cost = mem_cost.plus(Gte.cycles_of(gte_val))
+                        {}
+                    } else {
+                        match rs_i {
+                            0 => { # MFC2 (load-delayed like any load)
+                                load_i = rt_i
+                                load_v = Gte.read(gte0, rd_i.to_u64())
+                                {}
+                            }
+
+                            2 => { # CFC2
+                                load_i = rt_i
+                                load_v = Gte.read(gte0, rd_i.to_u64().plus(32))
+                                {}
+                            }
+
+                            4 => { # MTC2
+                                gte_kind = 1
+                                gte_idx = rd_i.to_u32_wrap()
+                                gte_val = b
+                                {}
+                            }
+
+                            6 => { # CTC2
+                                gte_kind = 1
+                                gte_idx = rd_i.to_u32_wrap().plus(32)
+                                gte_val = b
+                                {}
+                            }
+
+                            _ => {
+                                has_exc = Bool.True
+                                exc_code = exc_ri
+                                {}
+                            }
+                        }
+                    }
 
                 32 => { # LB
                     va = a.plus_wrap(si)
@@ -961,15 +1045,162 @@ Cpu := {
                     {}
                 }
 
-                50 => { # LWC2
-                    has_exc = Bool.True
-                    exc_code = exc_cpu
+                48 =>
+                    if cpu.sr.bitwise_and(0x1000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        # usable but the coprocessor does not exist: no
+                        # transfer happens, yet the ADDRESS is still
+                        # computed and a misaligned one still faults
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_adel
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {}
+                        {}
+                    }
+
+                49 =>
+                    if cpu.sr.bitwise_and(0x2000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        # usable but the coprocessor does not exist: no
+                        # transfer happens, yet the ADDRESS is still
+                        # computed and a misaligned one still faults
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_adel
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {}
+                        {}
+                    }
+
+                51 =>
+                    if cpu.sr.bitwise_and(0x8000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        # usable but the coprocessor does not exist: no
+                        # transfer happens, yet the ADDRESS is still
+                        # computed and a misaligned one still faults
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_adel
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {}
+                        {}
+                    }
+
+                56 =>
+                    if cpu.sr.bitwise_and(0x1000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        # usable but the coprocessor does not exist: no
+                        # transfer happens, yet the ADDRESS is still
+                        # computed and a misaligned one still faults
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_ades
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {}
+                        {}
+                    }
+
+                57 =>
+                    if cpu.sr.bitwise_and(0x2000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        # usable but the coprocessor does not exist: no
+                        # transfer happens, yet the ADDRESS is still
+                        # computed and a misaligned one still faults
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_ades
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {}
+                        {}
+                    }
+
+                59 =>
+                    if cpu.sr.bitwise_and(0x8000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                        {}
+                    } else {
+                        # usable but the coprocessor does not exist: no
+                        # transfer happens, yet the ADDRESS is still
+                        # computed and a misaligned one still faults
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_ades
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {}
+                        {}
+                    }
+
+                50 => { # LWC2: memory -> GTE data register
+                    if cpu.sr.bitwise_and(0x4000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                    } else {
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_adel
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {
+                            rr = bus0.read_val(ram0, 4, va, 0, cpu.cycles)
+                            mem_cost = mem_cost.plus(rr.cost)
+                            rd1_size = 4
+                            rd1_addr = va
+                            rd1_val = rr.val
+                            gte_kind = 1
+                            gte_idx = rt_i.to_u32_wrap()
+                            gte_val = rr.val
+                        }
+                    }
                     {}
                 }
 
-                58 => { # SWC2
-                    has_exc = Bool.True
-                    exc_code = exc_cpu
+                58 => { # SWC2: GTE data register -> memory
+                    if cpu.sr.bitwise_and(0x4000_0000) == 0 {
+                        has_exc = Bool.True
+                        exc_code = exc_cpu
+                    } else {
+                        va = a.plus_wrap(si)
+                        if va.bitwise_and(3) != 0 {
+                            has_exc = Bool.True
+                            exc_code = exc_ades
+                            exc_badv = va
+                            has_badv = Bool.True
+                        } else {
+                            st1_size = 4
+                            st1_addr = va
+                            st1_val = Gte.read(gte0, rt_i.to_u64())
+                        }
+                    }
                     {}
                 }
 
@@ -1006,10 +1237,10 @@ Cpu := {
                         cpu.sr
                     }
                     landed_s = land_all(cpu)
-                    { cpu: { ..landed_s, pc: cpu.pc.plus_wrap(4), sr: hle_sr, cycles: cpu.cycles.plus(1).plus(mem_cost) }, bus: bus2, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0 }
+                    { cpu: { ..landed_s, pc: cpu.pc.plus_wrap(4), sr: hle_sr, cycles: cpu.cycles.plus(1).plus(mem_cost) }, bus: bus2, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0 }
                 } else {
                 t = take_exception(land_all(cpu), bus2, op, exc_code, if has_badv { Badv(exc_badv) } else { NoBadv })
-                { cpu: t.cpu, bus: t.bus, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0 }
+                { cpu: t.cpu, bus: t.bus, st1_size: 0, st1_addr: 0, st1_val: 0, st2_size: 0, st2_addr: 0, st2_val: 0, rd1_size: 0, rd1_addr: 0, rd1_val: 0, rd2_size: 0, rd2_addr: 0, rd2_val: 0, ack_addr: 0, gte_kind: 0, gte_idx: 0, gte_val: 0 }
                 }
             } else {
                 # hoisted OUT of the return-record literal: a conditional
@@ -1057,6 +1288,9 @@ Cpu := {
                     rd2_size: rd2_size,
                     rd2_addr: rd2_addr,
                     rd2_val: rd2_val,
+                    gte_kind: gte_kind,
+                    gte_idx: gte_idx,
+                    gte_val: gte_val,
                     # timer MODE reads clear the reached flags on hardware;
                     # reads are pure — the acknowledge intent (computed
                     # above, outside this record build) is applied by the
@@ -1190,7 +1424,7 @@ Cpu := {
 # helper: run one instruction over a Vector bus from a bare state
 run1 = |pc, regs, op, reads| {
     seeded = regs.fold({ cpu: Cpu.init(pc), i: 0.U64 }, |st, v| { cpu: st.cpu.set_r(st.i, v), i: st.i.plus(1) })
-    Cpu.step(seeded.cpu, Bus.vector(op, pc, reads), [])
+    Cpu.step(seeded.cpu, Bus.vector(op, pc, reads), [], Gte.init({}))
 }
 
 # SRA sign-fills; SLL/SRL do not
@@ -1218,7 +1452,7 @@ expect {
 # branch delay slot: taken BNE commits after the next instruction
 expect {
     b = run1(0x1000, [0, 1, 2], 0x1422_0010, []) # BNE r1, r2, +0x10
-    step2 = Cpu.step(b.cpu, Bus.vector(0x0000_0000, 0x1004, []), []) # delay slot: NOP (SLL r0)
+    step2 = Cpu.step(b.cpu, Bus.vector(0x0000_0000, 0x1004, []), [], Gte.init({})) # delay slot: NOP (SLL r0)
     b.cpu.pc == 0x1004
     and b.cpu.branch == Slot({ take: Bool.True, target: 0x1044 })
     and step2.cpu.pc == 0x1044
@@ -1234,8 +1468,8 @@ expect {
 # load delay: stale read in the slot, value lands one instruction later
 expect {
     l = run1(0x1000, [0, 0x50], 0x8C22_0000, [0xAB]) # LW r2, 0(r1)
-    mid = Cpu.step(l.cpu, Bus.vector(0x0044_1825, 0x1004, []), []) # OR r3, r2, r4 — stale r2
-    mid2 = Cpu.step(mid.cpu, Bus.vector(0x0000_0000, 0x1008, []), [])
+    mid = Cpu.step(l.cpu, Bus.vector(0x0044_1825, 0x1004, []), [], Gte.init({})) # OR r3, r2, r4 — stale r2
+    mid2 = Cpu.step(mid.cpu, Bus.vector(0x0000_0000, 0x1008, []), [], Gte.init({}))
     l.cpu.get(2) == 0 # not yet visible
     and mid.cpu.get(3) == 0 # read the stale zero
     and mid.cpu.get(2) == 0xAB # landed after the slot instruction
@@ -1245,15 +1479,15 @@ expect {
 # delay-slot write to the same register wins over the pending load
 expect {
     l = run1(0x1000, [0, 0x50], 0x8C22_0000, [0xAB]) # LW r2
-    w = Cpu.step(l.cpu, Bus.vector(0x2402_0007, 0x1004, []), []) # ADDIU r2, r0, 7
+    w = Cpu.step(l.cpu, Bus.vector(0x2402_0007, 0x1004, []), [], Gte.init({})) # ADDIU r2, r0, 7
     w.cpu.get(2) == 7
 }
 
 # LWL reads through a pending load to the same register and re-enters the pipe
 expect {
     l = run1(0x1000, [0, 0x50], 0x8C22_0000, [0x0000_00AB]) # LW r2 <- 0xAB
-    lwl = Cpu.step(l.cpu, Bus.vector(0x8822_0007, 0x1004, [0x1122_3344]), []) # LWL r2, 7(r1): vaddr 0x57, sh 3
-    done = Cpu.step(lwl.cpu, Bus.vector(0x0000_0000, 0x1008, []), [])
+    lwl = Cpu.step(l.cpu, Bus.vector(0x8822_0007, 0x1004, [0x1122_3344]), [], Gte.init({})) # LWL r2, 7(r1): vaddr 0x57, sh 3
+    done = Cpu.step(lwl.cpu, Bus.vector(0x0000_0000, 0x1008, []), [], Gte.init({}))
     lwl.cpu.get(2) == 0 # still in the pipe
     and lwl.cpu.load == Pending({ reg: 2, val: 0x1122_3344 }) # sh 3: whole word
     and done.cpu.get(2) == 0x1122_3344
@@ -1262,7 +1496,7 @@ expect {
 # exception in a taken delay slot: BD + bit30 set, EPC = branch, TAR = target
 expect {
     b = run1(0x1000, [0, 1, 2], 0x1422_0010, []) # taken BNE
-    f = Cpu.step(b.cpu, Bus.vector(0x8C22_0001, 0x1004, []), []) # LW r2, 1(r1): misaligned
+    f = Cpu.step(b.cpu, Bus.vector(0x8C22_0001, 0x1004, []), [], Gte.init({})) # LW r2, 1(r1): misaligned
     f.cpu.pc == 0x8000_0080
     and f.cpu.epc == 0x1000
     and f.cpu.cause.bitwise_and(0xC000_0000) == 0xC000_0000
@@ -1275,7 +1509,7 @@ expect {
 expect {
     s = run1(0x1000, [], 0x0000_000C, [])
     withsr = { ..Cpu.init(0x3000), sr: 0x0000_0C } # bits set after a push
-    rfe = Cpu.step(withsr, Bus.vector(0x4200_0010, 0x3000, []), []) # RFE
+    rfe = Cpu.step(withsr, Bus.vector(0x4200_0010, 0x3000, []), [], Gte.init({})) # RFE
     s.cpu.pc == 0x8000_0080
     and s.cpu.cause.bitwise_and(0x7C) == 32
     and s.cpu.sr.bitwise_and(0x3F) == 0 # push from zero stays zero
@@ -1285,8 +1519,8 @@ expect {
 # MFC0 is load-delayed; MTC0 writes SR
 expect {
     withsr = { ..Cpu.init(0x1000), sr: 0x1234_5678 }
-    m = Cpu.step(withsr, Bus.vector(0x4002_6000, 0x1000, []), []) # MFC0 r2, sr
-    m2 = Cpu.step(m.cpu, Bus.vector(0x0000_0000, 0x1004, []), [])
+    m = Cpu.step(withsr, Bus.vector(0x4002_6000, 0x1000, []), [], Gte.init({})) # MFC0 r2, sr
+    m2 = Cpu.step(m.cpu, Bus.vector(0x0000_0000, 0x1004, []), [], Gte.init({}))
     w = run1(0x1000, [0, 0xFFFF_FFFF], 0x4081_6000, []) # MTC0 r1 -> sr
     m.cpu.get(2) == 0 and m2.cpu.get(2) == 0x1234_5678 and w.cpu.sr == 0xFFFF_FFFF
 }
@@ -1299,13 +1533,80 @@ expect {
     and g.cpu.cause.bitwise_and(0x3000_0000) == 0x2000_0000 # CE = 2
 }
 
+# SR.CU gates all four coprocessor slots. These expects carry the
+# behaviour that ps1-tests cpu/cop judges on hardware — that gate cannot
+# run here because it reads and mutates the BIOS thread-control block
+# (see the runner's exclusion note), so the semantics are pinned here
+# instead. Every case below matches a named subtest of cpu/cop.
+# testCop1Disabled / testCop3Disabled: CU clear -> coprocessor-unusable
+expect {
+    g = run1(0x1000, [], 0x4400_0000, []) # COP1 op, SR = 0
+    g.cpu.pc == 0x8000_0080
+    and g.cpu.cause.bitwise_and(0x7C) == 44
+    and g.cpu.cause.bitwise_and(0x3000_0000) == 0x1000_0000 # CE = 1
+}
+
+expect {
+    g = run1(0x1000, [], 0x4C00_0000, []) # COP3 op, SR = 0
+    g.cpu.pc == 0x8000_0080
+    and g.cpu.cause.bitwise_and(0x3000_0000) == 0x3000_0000 # CE = 3
+}
+
+# testCop1Enabled / testCop3Enabled: CU SET -> a silent no-op, NOT an
+# exception. The coprocessors do not exist, but the CU bit still gates.
+expect {
+    seeded = { ..Cpu.init(0x1000), sr: 0xF000_0000 }
+    g = Cpu.step(seeded, Bus.vector(0x4400_0000, 0x1000, []), [], Gte.init({}))
+    g.cpu.pc == 0x1004 and g.cpu.cause.bitwise_and(0x7C) == 0
+}
+
+expect {
+    seeded = { ..Cpu.init(0x1000), sr: 0xF000_0000 }
+    g = Cpu.step(seeded, Bus.vector(0x4C00_0000, 0x1000, []), [], Gte.init({}))
+    g.cpu.pc == 0x1004 and g.cpu.cause.bitwise_and(0x7C) == 0
+}
+
+# testSwc0Disabled / testSwc0Enabled: SWC0 is CU0-gated, and when usable
+# it transfers nothing but still computes its address
+expect {
+    g = run1(0x1000, [], 0xE020_0000, []) # SWC0 $0, 0(r1), SR = 0
+    g.cpu.cause.bitwise_and(0x7C) == 44
+}
+
+expect {
+    seeded = { ..Cpu.init(0x1000), sr: 0xF000_0000 }
+    g = Cpu.step(seeded, Bus.vector(0xE020_0000, 0x1000, []), [], Gte.init({}))
+    g.cpu.pc == 0x1004 and g.cpu.cause.bitwise_and(0x7C) == 0
+}
+
+# a misaligned LWC3 still faults with an address error even though COP3
+# does not exist (psxtest_cpx's lwc3_* rows want exactly this)
+expect {
+    seeded = { ..Cpu.set_r(Cpu.init(0x1000), 1, 0x0000_0001), sr: 0xF000_0000 }
+    g = Cpu.step(seeded, Bus.vector(0xCC20_0000, 0x1000, []), [], Gte.init({}))
+    g.cpu.pc == 0x8000_0080 and g.cpu.cause.bitwise_and(0x7C) == 16 # excode 4, AdEL
+}
+
+# testCop0InvalidOpcode: an unrecognised COP0 rs is a silent no-op
+expect {
+    g = run1(0x1000, [], 0x43E0_0000, []) # cop0 0x1f
+    g.cpu.pc == 0x1004 and g.cpu.cause.bitwise_and(0x7C) == 0
+}
+
+# testCop2Enabled: with CU2 set, MFC2 executes and reads the GTE
+expect {
+    seeded = { ..Cpu.init(0x1000), sr: 0xF000_0000 }
+    g = Cpu.step(seeded, Bus.vector(0x4801_0800, 0x1000, []), [], Gte.init({}))
+    g.cpu.pc == 0x1004 and g.cpu.cause.bitwise_and(0x7C) == 0
+}
+
 # unmasked interrupt vectors with excode 0 before the next instruction
 expect {
     b0 = Bus.ps1(List.repeat(0, 512), Bool.False).raise_irq(2)
     ready = { ..Cpu.init(0x1000), sr: 0x0000_0401, cause: 0x0000_0400 } # IEc + IM2 set, IP2 mirrored
-    r = Cpu.step(ready, b0, [])
+    r = Cpu.step(ready, b0, [], Gte.init({}))
     masked = { ..Cpu.init(0x1000), sr: 0x0000_0001, cause: 0x0000_0400 } # IEc but IM2 clear
-    m = Cpu.step(masked, b0, [])
+    m = Cpu.step(masked, b0, [], Gte.init({}))
     r.cpu.pc == 0x8000_0080
     and r.cpu.cause.bitwise_and(0x7C) == 0 # excode 0 = interrupt
     and r.cpu.epc == 0x1000
@@ -1320,7 +1621,7 @@ expect {
         cause: 0x0000_0400,
         branch: Slot({ take: Bool.True, target: 0x3000 }),
     }
-    r = Cpu.step(in_slot, b0, [])
+    r = Cpu.step(in_slot, b0, [], Gte.init({}))
     r.cpu.epc == 0x2000 and r.cpu.cause.bitwise_and(0x8000_0000) != 0 and r.cpu.tar == 0x3000
 }
 
@@ -1333,7 +1634,7 @@ expect {
     ram = [page]
     iso0 = { ..Cpu.init(0x0), sr: 0x0001_0000 }
     iso = Cpu.set_r(iso0, 1, 0x100)
-    stepped = Cpu.step(iso, bus0, ram)
+    stepped = Cpu.step(iso, bus0, ram, Gte.init({}))
     ram2 = Cpu.store_ram(ram, stepped.st1_size, stepped.st1_addr, stepped.st1_val)
     check = stepped.bus.read_val(ram2, 4, 0x100, 0, 0)
     check.val == 0x1111_1111
@@ -1346,7 +1647,7 @@ expect {
     seeded0 = Cpu.set_r(at_vec, 9, 0x3D) # $t1 = putchar
     seeded1 = Cpu.set_r(seeded0, 4, 0x21) # $a0 = '!'
     seeded = Cpu.set_r(seeded1, 31, 0x8000_1234)
-    r = Cpu.step(seeded, b0, [])
+    r = Cpu.step(seeded, b0, [], Gte.init({}))
     r.cpu.pc == 0x8000_1234 and r.bus.tty_bytes() == [0x21]
 }
 
@@ -1361,8 +1662,8 @@ expect {
     _ = page0
     bus = Bus.ps1(List.repeat(0, 512), Bool.False)
     cpu = Cpu.set_r(Cpu.init(0x8000_0000), 1, 0x1F80_0000)
-    r1 = Cpu.step(cpu, bus, [page])
-    r2 = Cpu.step(r1.cpu, r1.bus, [page])
-    r3 = Cpu.step({ ..r2.cpu, r1: 0 }, r2.bus, [page])
+    r1 = Cpu.step(cpu, bus, [page], Gte.init({}))
+    r2 = Cpu.step(r1.cpu, r1.bus, [page], Gte.init({}))
+    r3 = Cpu.step({ ..r2.cpu, r1: 0 }, r2.bus, [page], Gte.init({}))
     r1.ack_addr == 0x1F80_1124 and r2.ack_addr == 0 and r3.ack_addr == 0
 }

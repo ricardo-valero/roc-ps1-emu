@@ -1,4 +1,4 @@
-package [Bit, Mips, Bus, Cpu, Exe, Psx, Dma, Gpu, Raster] {}
+package [Bit, Mips, Bus, Cpu, Exe, Psx, Dma, Gpu, Raster, Gte] {}
 
 import Bit
 import Mips
@@ -9,3 +9,4 @@ import Psx
 import Dma
 import Gpu
 import Raster
+import Gte

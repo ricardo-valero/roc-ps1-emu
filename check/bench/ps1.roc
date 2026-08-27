@@ -8,6 +8,15 @@
 # spec; host steps/s is printed for the copy-churn diagnosis.
 #
 #   roc build check/bench/ps1.roc --output=/tmp/bench_ps1 && /tmp/bench_ps1 [N]
+# ps1-gte ledger (2026-08-26): the step grew a COP2 arm (CU gating,
+# MFC2/CFC2/MTC2/CTC2, the imm25 command form, LWC2/SWC2) plus three
+# GTE-intent fields on the Out record. Measured cost is small and both
+# floors hold: core-only 0.33x (was 0.32x on the same machine before the
+# change - inside noise), real-bus 0.32x (the gpu-core change recorded
+# 0.33-0.34x, so roughly 3% for the new arm). The register file is
+# DRIVER-OWNED and read val-only inside the step, so nothing GTE-shaped
+# is threaded through the step's payload; that is why the cost is a
+# branch and not a memmove. Floors unchanged at 0.30x.
 app [main!] {
     pf: platform "https://github.com/roc-lang/basic-cli/releases/download/0.21.0/4rAQg8kUYZ3Vksr4qMQHpaFYNiHSn9GgS7gVxghd1XYV.tar.zst",
     ps1: "../../package/main.roc",
@@ -20,6 +29,7 @@ import ps1.Cpu
 import ps1.Bus
 import ps1.Psx
 import ps1.Gpu
+import ps1.Gte
 
 kernel : List(U8)
 kernel = [
@@ -43,13 +53,13 @@ main! = |args| {
     bus0 = Bus.ps1(List.repeat(0, 512), Bool.False)
     page0 = kernel.concat(List.repeat(0, 0x1000 - kernel.len()))
     ram0 = [page0].concat(List.repeat(List.repeat(0, 0x1000), 0x1FF))
-    warmup = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, Gpu.vram_init({}), 1000.plus(n % 2))
+    warmup = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, Gpu.vram_init({}), Gte.init({}), 1000.plus(n % 2))
     if warmup.cpu.pc.bitwise_and(0x1FFF_FFFF) >= 0x24 {
         Stdout.line!("BENCH KERNEL DIVERGED: pc=${warmup.cpu.pc.to_str()}")?
         Err(KernelDiverged)
     } else {
         t0 = Utc.now!()
-        result = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, Gpu.vram_init({}), n)
+        result = Psx.run(Cpu.init(0x8000_0000), bus0, ram0, Gpu.vram_init({}), Gte.init({}), n)
         t1 = Utc.now!()
         elapsed_ns = (t1.minus_wrap(t0)).to_u64_wrap()
         if elapsed_ns == 0 {

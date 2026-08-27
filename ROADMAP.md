@@ -68,8 +68,23 @@ ticked as changes archive.
   references: mask bits, CLUT cache staleness, drawing offset/clip,
   overlap copies. Line rasterizer implemented (its test EXE needs the
   GTE). The two-loop console shape kept the bench at 0.33x.
-- [ ] **GTE** — fixed-point vector coprocessor. Gated by Amidog
-  psxtest_gte + ps1-tests gte-fuzz. Pure math; no JSON tests exist yet.
+- [x] **GTE** — fixed-point vector coprocessor: the 64-register file
+  with its access asymmetries (sign-extension, the SXY FIFO's
+  push-on-write, IRGB/ORGB packing, LZCR), all 22 opcodes, the 44-bit
+  MAC pipeline with saturation and FLAG, the UNR reciprocal divide, and
+  the documented hardware bugs (MVMVA's far-color truncation, the
+  garbage matrix and vector). CPU side: COP2 dispatch with real SR.CU
+  gating across all four coprocessor slots, GTE state driver-owned and
+  reached by val-only reads plus intents. Gated by a NEW pure-Roc
+  vector slice over upstream's hardware capture — **1,150/1,150 cases
+  bit-identical across all 64 registers, no exclusions** — plus
+  gte/test-all running the same cases on-console (proving the dispatch
+  path) and ps1-tests `lines` re-admitted, its VRAM reference now
+  BIT-EXACT (the eleventh). Four things the documentation does not say,
+  found by the capture: the MAC accumulator WRAPS at 44 bits with the
+  flag taken before wrapping; the far-color difference truncates to 32
+  bits AFTER the shift; RTPT runs the depth-cue step only on the last
+  vertex; SZ3 comes from the raw accumulator and feeds the divide.
 - [ ] **BIOS boot** — OpenBIOS LLE to logo and shell; trace-diff
   against PCSX-Redux replaces a nestest-style golden log.
 - [ ] **CD-ROM core** — controller state machine, bin/cue reading,

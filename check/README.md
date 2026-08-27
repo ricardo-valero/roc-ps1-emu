@@ -10,6 +10,10 @@ Planned slices, in roadmap order:
 
 - `single-step/` — SingleStepTests/r3000 JSON gate for the CPU
 - `amidog/` — Amidog psxtest_cpu / psxtest_cpx / psxtest_gte PS-EXEs
+- `gte-fuzz/` — the GTE's vector gate: upstream's hardware capture of
+  1,150 full 64-register input/output cases, driven straight against
+  `Gte.roc` with no CPU or console in the way (see the slice's header
+  for the provenance chain that licenses the capture as ground truth)
 - `ps1-tests/` — JaCzekanski ps1-tests EXEs; GPU tests diff VRAM dumps
   against hardware-captured references (the frozen-digest workflow)
 - `boot/` — OpenBIOS boot-to-shell gate

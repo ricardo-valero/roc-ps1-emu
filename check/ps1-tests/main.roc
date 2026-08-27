@@ -65,14 +65,15 @@ import ps1.Cpu
 import ps1.Exe
 import ps1.Psx
 import ps1.Gpu
+import ps1.Gte
 
 excluded_note : List({ name : Str, reason : Str })
 excluded_note = [
+    { name: "cop", reason: "NOT a coprocessor-semantics gap — its first four subtests PASS here (cpu/cop, testCop0Disabled, testCop0Enabled, testCop0InvalidOpcode) and the rest of what it checks is pinned by expects in Cpu.roc. It stalls at testSwc0Disabled because common/exception.cpp reads the BIOS PROCESS/THREAD CONTROL BLOCK (processes[0]->thread via 0x108) and hooks A0[0x40], then resumes by mutating the TCB's saved returnPC — a kernel surface this machine does not model (probe 2026-08-26: exception taken correctly, cause 0x42C excode 11 CE 0, then loops at 0x80000094 with no handler behind the vector). Re-admit with the bios-boot change" },
     { name: "dpcr", reason: "its DPCR-gating observable is SPU (channel 4) DMA readback — needs the SPU device; re-admit with the spu change (probe 2026-08-25: runs, then starts ch4 transfers loudly)" },
     { name: "chopping", reason: "measures CPU cycles DURING chopped transfers — the atomic-transfer console model cannot express DMA/CPU interleave timing (12 sync-1 sweep rows); a recorded model finding, re-visit if transfer timing ever lands" },
     { name: "bandwidth", reason: "draw-speed rows need the rasterizer plus per-primitive GPU timing; re-evaluate after the rasterizer group" },
     { name: "gpustat", reason: "no released EXE in build-158 (source-only upstream test); its documented GPUSTAT semantics are covered by expects — re-admit if a newer release ships a binary" },
-    { name: "lines", reason: "the EXE computes its star pattern with the GTE (COP2 — cause 0x2C on first use); the LINE RASTERIZER itself is implemented and wired, re-admit with the gte change" },
 ]
 
 parse_n : List(OsStr), U64, U64 -> U64
@@ -92,8 +93,22 @@ excluded_row = |line|
 
 # split into normalized lines: drop ResetGraph:/VSync: debug and blanks
 norm_lines : Str -> List(Str)
+strip_pct : Str -> Str
+strip_pct = |line|
+    if line.starts_with("% ") {
+        u = line.to_utf8()
+        Str.from_utf8(u.sublist({ start: 2, len: u.len().minus(2) })) ?? line
+    } else {
+        line
+    }
+
+# NORMALIZATION RULE 7: cpu/cop's psx.log prefixes every line with
+# "% " where every other vendored log does not — a capture-rig artifact
+# of that recording session, not test output. Strip it so the same
+# subsequence matcher serves both shapes.
 norm_lines = |text|
-    text.split_on("\n").fold([], |acc, line| {
+    text.split_on("\n").fold([], |acc, line0| {
+        line = strip_pct(line0)
         keep = line != "" and line.starts_with("ResetGraph:") == Bool.False and line.starts_with("VSync:") == Bool.False
         if keep { acc.append(line) } else { acc }
     })
@@ -258,7 +273,7 @@ main! = |args| {
         }
     bus0 = Bus.ps1(List.repeat(0, 0x80000), Bool.True)
     loaded = Exe.load(bus0, bytes)?
-    out = Psx.run(loaded.cpu, loaded.bus, loaded.ram, Gpu.vram_init({}), budget)
+    out = Psx.run(loaded.cpu, loaded.bus, loaded.ram, Gpu.vram_init({}), Gte.init({}), budget)
     tty = Str.from_utf8(out.bus.tty_bytes()) ?? ""
     want_all = norm_lines(ref_text)
     want = want_all.fold([], |acc, l| if excluded_row(l) { acc } else { acc.append(l) })
@@ -304,6 +319,26 @@ main! = |args| {
 
     # rule 9: judged region (full frame unless recorded otherwise)
     jr = if name == "transparency" { { x: 0.U64, y: 0.U64, w: 320.U64, h: 240.U64 } } else { { x: 0.U64, y: 0.U64, w: 1024.U64, h: 512.U64 } }
+    # RULE 10 (gpu/lines): the two gouraudMultiLine primitives at
+    # (150,140) and (210,140) are LINE_G4s whose FOURTH colour is never
+    # initialised — gpu/lines/main.c calls setRGB2 twice and setRGB3
+    # never, so r3/g3/b3 are stack garbage. The hardware capture baked
+    # in whatever the console's stack happened to hold; no emulator can
+    # reproduce that, and the value is undefined on real hardware too.
+    # Their LAST segment (v3 -> v2, the 32-pixel diagonal from the
+    # origin corner) is therefore UNJUDGEABLE and skipped. Everything
+    # else in the frame, including the other three segments of each
+    # primitive, is judged normally. Verified 2026-08-26: with these 64
+    # pixels excluded the test is bit-exact, and Raster.draw_line was
+    # separately confirmed to reproduce the hardware gradient exactly
+    # when given the real endpoint colours.
+    undefined_px = |px_x, px_y|
+        if name == "lines" and px_y >= 140 and px_y < 172 {
+            k = px_y.minus(140)
+            px_x == k.plus(150) or px_x == k.plus(210)
+        } else {
+            Bool.False
+        }
     # rule 8: VRAM reference diff when a converted blob exists
     vram_diff =
         match Path.from_os_str(OsStr.from_str("check/ps1-tests/data/${name}.vram")).read_bytes!() {
@@ -315,7 +350,7 @@ main! = |args| {
                 while i < 0x8_0000 {
                     px_x = i.bitwise_and(1023)
                     px_y = i.shr_zf_wrap(10)
-                    in_region = px_x >= jr.x and px_x < jr.x.plus(jr.w) and px_y >= jr.y and px_y < jr.y.plus(jr.h)
+                    in_region = px_x >= jr.x and px_x < jr.x.plus(jr.w) and px_y >= jr.y and px_y < jr.y.plus(jr.h) and undefined_px(px_x, px_y) == Bool.False
                     ours = if in_region { (out.vram.get(i) ?? 0).bitwise_and(0x7FFF) } else { 0 }
                     want_px = if in_region { (ref_blob.get(i.times_wrap(2)) ?? 0).to_u16().bitwise_or((ref_blob.get(i.times_wrap(2).plus(1)) ?? 0).to_u16().shl_wrap(8)) } else { 0 }
                     if ours != want_px {

@@ -11,6 +11,11 @@
 #   cp /tmp/ps1tests/timers/timers.exe check/ps1-tests/data/
 #   cp /tmp/ps1tests/dma/otc-test/otc-test.exe check/ps1-tests/data/
 #   (and the gpu/* EXEs the same way)
+#   cp /tmp/ps1tests/gte/test-all/test-all.exe check/ps1-tests/data/
+#   cp /tmp/ps1tests/gte/test-all/psx.log check/ps1-tests/data/test-all.psx.log
+#   cp /tmp/ps1tests/cpu/cop/cop.exe check/ps1-tests/data/
+#   cp /tmp/ps1tests/cpu/cop/psx.log check/ps1-tests/data/cop.psx.log
+#   cp /tmp/ps1tests/gte-fuzz/gte_valid_0xc0ffee_50.log check/gte-fuzz/data/
 #
 #   VRAM references convert once from the upstream vram.png captures:
 #   python3 check/ps1-tests/convert-vram.py <src>/vram.png data/<name>.vram
@@ -69,6 +74,10 @@ files = [
     { name: "transparency.vram", sha256: "21b80ddf7c61ef0435e18167411a0e2900c215b81023241592ce0b08289a19ac" },
     { name: "uv-interpolation.vram", sha256: "44d1d1a4888edb6897afe9aeef657685a92b3c2de21599d4252b6f56ae8445fc" },
     { name: "vram-to-vram-overlap.vram", sha256: "93010b5ae50dd9ec22deb9f52623a1651afbed4a68035a77ebabb91aefab3369" },
+    { name: "test-all.exe", sha256: "479adc925da6cc4844b567a033fabc06b2ab934ffbbb79c5dad698be20944b9e" },
+    { name: "test-all.psx.log", sha256: "78db534a7b02b4bc4c521a20a406743f296dada95c5220568f2df6e0ac37b7a0" },
+    { name: "cop.exe", sha256: "d31d3cec66abe8db7935b51590f206602346284da2ac20ea8614339924ea9981" },
+    { name: "cop.psx.log", sha256: "e3b09837989c4fd53e4d192ac869f437d965a4d71342bb80d038b5cc813c729c" },
 ]
 
 verify! : { name : Str, sha256 : Str } => Try({}, _)

@@ -3,6 +3,7 @@ import /Cpu
 import /Dma
 import /Gpu
 import /Raster
+import /Gte
 
 # The console layer: owns emulated time. One run loop for every driver —
 # CPU step, store-intent application, the VBlank frame clock, and the
@@ -30,11 +31,18 @@ Psx :: [].{
 
     # run the console for `budget` instructions; vram rides beside the
     # RAM pages (driver-owned, GPU commands land on it from group 2 on)
-    run : Cpu, Bus, List(List(U8)), List(U16), U64 -> { cpu : Cpu, bus : Bus, ram : List(List(U8)), vram : List(U16), steps : U64 }
-    run = |cpu0, bus0, ram0, vram0, budget| {
+    run : Cpu, Bus, List(List(U8)), List(U16), List(U32), U64 -> { cpu : Cpu, bus : Bus, ram : List(List(U8)), vram : List(U16), steps : U64 }
+    run = |cpu0, bus0, ram0, vram0, gte0, budget| {
         var cpu = cpu0
         var bus = bus0
         var ram = ram0
+        # gte0 comes IN but does NOT go back out: adding `gte` to the
+        # returned record SEGFAULTS the nightly compiler (isolated
+        # 2026-08-26 — a fifth poison shape beside the four the membus
+        # change recorded; the same record without it compiles). Nothing
+        # needs it back: the register file lives for the length of a run
+        # and every driver calls `run` once per program.
+        var gte = gte0
         var vram = vram0
         var k = 0.U64
         var next_vblank = ntsc_frame_cycles
@@ -71,9 +79,16 @@ Psx :: [].{
         while going {
             var hot = Bool.True
             while hot {
-                r = Cpu.step(cpu, bus, ram)
+                r = Cpu.step(cpu, bus, ram, gte)
                 cpu = r.cpu
                 bus = r.bus
+                # COP2 intents land here, exactly like store intents: the
+                # step never carries the register file in its payload
+                if r.gte_kind == 1 {
+                    gte = Gte.write(gte, r.gte_idx.to_u64(), r.gte_val)
+                } else if r.gte_kind == 2 {
+                    gte = Gte.command(gte, r.gte_val)
+                } else {}
                 if r.st1_size != 0 {
                     ram = Cpu.store_ram(ram, r.st1_size, r.st1_addr, r.st1_val)
                     ram = Cpu.store_ram(ram, r.st2_size, r.st2_addr, r.st2_val)
@@ -398,7 +413,7 @@ expect {
     page = List.concat(prog, List.repeat(0, 0x1000.U64.minus(prog.len())))
     bus0 = Bus.ps1(List.repeat(0, 512), Bool.False)
     cpu0 = Cpu.set_r(Cpu.set_r(Cpu.init(0x8000_0000), 1, 0x100), 2, 0xCAFE_F00D)
-    out = Psx.run(cpu0, bus0, [page], [], 4)
+    out = Psx.run(cpu0, bus0, [page], [], Gte.init({}), 4)
     word = out.bus.read_val(out.ram, 4, 0x100, 0, 0)
     out.steps == 4 and word.val == 0xCAFE_F00D
 }
@@ -414,7 +429,7 @@ expect {
         .write(2, 0x1F80_1128, 50, 0) # target 50
         .write(2, 0x1F80_1124, 0x0018, 0) # reset-at-target, IRQ-at-target, one-shot
     cpu = { ..Cpu.init(0x8000_0000), sr: 0x0000_0401 } # IEc + IM2
-    out = Psx.run(cpu, bus, [page], [], 120)
+    out = Psx.run(cpu, bus, [page], [], Gte.init({}), 120)
     stat = out.bus.read_val(out.ram, 4, 0x1F80_1070, 0, out.cpu.cycles)
     stat.val.bitwise_and(0x40) != 0
     and out.cpu.cause.bitwise_and(0x7C) == 0 # excode 0 = interrupt
@@ -432,17 +447,17 @@ expect {
     bus0 = Bus.ps1(List.repeat(0, 512), Bool.False)
     bus_on = bus0.write(4, 0x1F80_10F0, 0x0F65_4329, 0) # enable ch6 + ch0 (reset DPCR enables nothing)
     cpu0 = Cpu.set_r(Cpu.set_r(Cpu.set_r(Cpu.set_r(Cpu.init(0x8000_0000), 1, 0x1F80_0000), 2, 0x200), 3, 4), 4, 0x1100_0000)
-    out = Psx.run(cpu0, bus_on, [page], [], 8)
+    out = Psx.run(cpu0, bus_on, [page], [], Gte.init({}), 8)
     term = out.bus.read_val(out.ram, 4, 0x1F4, 0, 0)
     e1 = out.bus.read_val(out.ram, 4, 0x200, 0, 0)
     chcr = out.bus.read_val([], 4, 0x1F80_10E8, 0, 0)
     madr = out.bus.read_val([], 4, 0x1F80_10E0, 0, 0)
     # DPCR at reset leaves every channel disabled: same program, no transfer
-    out2 = Psx.run(cpu0, bus0, [page], [], 8)
+    out2 = Psx.run(cpu0, bus0, [page], [], Gte.init({}), 8)
     e2 = out2.bus.read_val(out2.ram, 4, 0x200, 0, 0)
     # device channel (2) started: loud
     cpu_dev = Cpu.set_r(cpu0, 1, 0x1F80_0000.minus_wrap(0x60)) # r1 + 0x10E0 -> 0x1F801080+... shift base so stores hit D2
-    out3 = Psx.run(Cpu.set_r(cpu_dev, 4, 0x1100_0000), bus_on, [page], [], 5) # one loop pass = one start = one loud entry
+    out3 = Psx.run(Cpu.set_r(cpu_dev, 4, 0x1100_0000), bus_on, [page], [], Gte.init({}), 5) # one loop pass = one start = one loud entry
     term.val == 0x00FF_FFFF
     and e1.val == 0x1FC
     and chcr.val.bitwise_and(0x0100_0000) == 0
@@ -462,7 +477,7 @@ expect {
         .write(4, 0x1F80_10F4, 0x00C0_0000, 0) # DICR: ch6 IRQ enable + master
         .write(4, 0x1F80_1074, 0x0008, 0) # unmask DMA in I_MASK
     cpu = { ..Cpu.set_r(Cpu.set_r(Cpu.set_r(Cpu.set_r(Cpu.init(0x8000_0000), 1, 0x1F80_0000), 2, 0x200), 3, 4), 4, 0x1100_0000), sr: 0x0000_0401 }
-    out = Psx.run(cpu, bus, [page], [], 6)
+    out = Psx.run(cpu, bus, [page], [], Gte.init({}), 6)
     dicr = out.bus.read_val([], 4, 0x1F80_10F4, 0, 0)
     stat = out.bus.read_val([], 4, 0x1F80_1070, 0, 0)
     dicr.val.bitwise_and(0x4000_0000) != 0 # ch6 flag
@@ -489,7 +504,7 @@ expect {
     v0 = Gpu.vram_init({})
     v1 = Gpu.vram_set(Gpu.vram_set(Gpu.vram_set(Gpu.vram_set(v0, 100, 2, 0x1111), 101, 2, 0x2222), 102, 2, 0x3333), 103, 2, 0x4444)
     bus = Bus.ps1(List.repeat(0, 512), Bool.False)
-    out = Psx.run(Cpu.init(0x8000_0000), bus, [page], v1, 18)
+    out = Psx.run(Cpu.init(0x8000_0000), bus, [page], v1, Gte.init({}), 18)
     stat = out.bus.read_val([], 4, 0x1F80_1814, 0, out.cpu.cycles)
     Cpu.get(out.cpu, 2) == 0x2222_1111
     and Cpu.get(out.cpu, 3) == 0x4444_3333

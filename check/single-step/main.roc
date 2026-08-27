@@ -27,6 +27,7 @@ import pf.Stdout
 import chk.Vectors
 import ps1.Cpu
 import ps1.Bus
+import ps1.Gte
 
 excluded : List({ name : Str, reason : Str })
 excluded = []
@@ -83,7 +84,7 @@ run_case = |test| {
     data_reads = test.cycles.fold([], |acc, c| if c.actions == 1 { acc.append(c.val) } else { acc })
     cpu = from_vector_state(test.initial)
     bus = Bus.vector(test.opcode, test.opcode_addr, data_reads)
-    out = Cpu.step(cpu, bus, [])
+    out = Cpu.step(cpu, bus, [], Gte.init({}))
     fin = test.final
     var problems = []
     var i = 0.U64
